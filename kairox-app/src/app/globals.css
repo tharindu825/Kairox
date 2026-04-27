@@ -1,0 +1,346 @@
+@import "tailwindcss";
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+/* ─── Kairox Trading Theme ──────────────────────────────────────────────── */
+
+:root {
+  --kx-bg-primary: #0a0e17;
+  --kx-bg-secondary: #111827;
+  --kx-bg-card: #1a2332;
+  --kx-bg-card-hover: #1f2b3d;
+  --kx-bg-surface: #243044;
+  --kx-bg-input: #0f1923;
+
+  --kx-border: #2a3a4e;
+  --kx-border-active: #3b82f6;
+
+  --kx-text-primary: #f1f5f9;
+  --kx-text-secondary: #94a3b8;
+  --kx-text-muted: #64748b;
+
+  --kx-accent: #3b82f6;
+  --kx-accent-hover: #2563eb;
+
+  --kx-long: #00d4aa;
+  --kx-long-bg: rgba(0, 212, 170, 0.12);
+  --kx-short: #ff4757;
+  --kx-short-bg: rgba(255, 71, 87, 0.12);
+  --kx-hold: #f59e0b;
+  --kx-hold-bg: rgba(245, 158, 11, 0.12);
+
+  --kx-success: #10b981;
+  --kx-warning: #f59e0b;
+  --kx-danger: #ef4444;
+  --kx-info: #3b82f6;
+
+  --kx-glass: rgba(26, 35, 50, 0.8);
+  --kx-glass-border: rgba(255, 255, 255, 0.06);
+
+  --kx-sidebar-width: 260px;
+  --kx-sidebar-collapsed: 72px;
+  --kx-topbar-height: 64px;
+
+  --kx-radius: 12px;
+  --kx-radius-sm: 8px;
+  --kx-radius-xs: 6px;
+}
+
+@theme inline {
+  --color-background: var(--kx-bg-primary);
+  --color-foreground: var(--kx-text-primary);
+  --font-sans: 'Inter', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+}
+
+/* ─── Base Styles ────────────────────────────────────────────────────────── */
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--kx-border) transparent;
+}
+
+body {
+  background: var(--kx-bg-primary);
+  color: var(--kx-text-primary);
+  font-family: 'Inter', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ─── Custom Scrollbar ───────────────────────────────────────────────────── */
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--kx-border);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--kx-text-muted);
+}
+
+/* ─── Glass Card ─────────────────────────────────────────────────────────── */
+
+.kx-card {
+  background: var(--kx-bg-card);
+  border: 1px solid var(--kx-glass-border);
+  border-radius: var(--kx-radius);
+  backdrop-filter: blur(12px);
+  transition: all 0.2s ease;
+}
+
+.kx-card:hover {
+  background: var(--kx-bg-card-hover);
+  border-color: var(--kx-border);
+}
+
+.kx-card-glass {
+  background: var(--kx-glass);
+  border: 1px solid var(--kx-glass-border);
+  border-radius: var(--kx-radius);
+  backdrop-filter: blur(20px);
+}
+
+/* ─── Signal Side Badges ─────────────────────────────────────────────────── */
+
+.kx-badge-long {
+  background: var(--kx-long-bg);
+  color: var(--kx-long);
+  border: 1px solid rgba(0, 212, 170, 0.3);
+}
+
+.kx-badge-short {
+  background: var(--kx-short-bg);
+  color: var(--kx-short);
+  border: 1px solid rgba(255, 71, 87, 0.3);
+}
+
+.kx-badge-hold {
+  background: var(--kx-hold-bg);
+  color: var(--kx-hold);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+/* ─── Risk Verdict Badges ────────────────────────────────────────────────── */
+
+.kx-verdict-approved {
+  background: rgba(16, 185, 129, 0.12);
+  color: #10b981;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.kx-verdict-reduced {
+  background: rgba(245, 158, 11, 0.12);
+  color: #f59e0b;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.kx-verdict-watch {
+  background: rgba(59, 130, 246, 0.12);
+  color: #3b82f6;
+  border: 1px solid rgba(59, 130, 246, 0.3);
+}
+
+.kx-verdict-blocked {
+  background: rgba(239, 68, 68, 0.12);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+/* ─── Buttons ────────────────────────────────────────────────────────────── */
+
+.kx-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 20px;
+  border-radius: var(--kx-radius-sm);
+  font-weight: 500;
+  font-size: 14px;
+  transition: all 0.2s ease;
+  cursor: pointer;
+  border: none;
+  outline: none;
+}
+
+.kx-btn-primary {
+  background: var(--kx-accent);
+  color: white;
+}
+
+.kx-btn-primary:hover {
+  background: var(--kx-accent-hover);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+}
+
+.kx-btn-ghost {
+  background: transparent;
+  color: var(--kx-text-secondary);
+  border: 1px solid var(--kx-border);
+}
+
+.kx-btn-ghost:hover {
+  background: var(--kx-bg-surface);
+  color: var(--kx-text-primary);
+}
+
+.kx-btn-danger {
+  background: rgba(239, 68, 68, 0.15);
+  color: var(--kx-danger);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.kx-btn-danger:hover {
+  background: rgba(239, 68, 68, 0.25);
+}
+
+/* ─── Input Fields ───────────────────────────────────────────────────────── */
+
+.kx-input {
+  width: 100%;
+  padding: 10px 14px;
+  background: var(--kx-bg-input);
+  border: 1px solid var(--kx-border);
+  border-radius: var(--kx-radius-sm);
+  color: var(--kx-text-primary);
+  font-size: 14px;
+  transition: all 0.2s ease;
+  outline: none;
+}
+
+.kx-input:focus {
+  border-color: var(--kx-accent);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+}
+
+.kx-input::placeholder {
+  color: var(--kx-text-muted);
+}
+
+/* ─── Animations ─────────────────────────────────────────────────────────── */
+
+@keyframes kx-pulse-green {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(0, 212, 170, 0.4); }
+  50% { box-shadow: 0 0 0 8px rgba(0, 212, 170, 0); }
+}
+
+@keyframes kx-pulse-red {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 71, 87, 0.4); }
+  50% { box-shadow: 0 0 0 8px rgba(255, 71, 87, 0); }
+}
+
+@keyframes kx-shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.kx-skeleton {
+  background: linear-gradient(90deg, var(--kx-bg-card) 25%, var(--kx-bg-surface) 50%, var(--kx-bg-card) 75%);
+  background-size: 200% 100%;
+  animation: kx-shimmer 1.5s ease-in-out infinite;
+  border-radius: var(--kx-radius-sm);
+}
+
+@keyframes kx-fade-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.kx-fade-in {
+  animation: kx-fade-in 0.3s ease-out;
+}
+
+/* ─── Price Ticker ───────────────────────────────────────────────────────── */
+
+.kx-price-up {
+  color: var(--kx-long);
+}
+
+.kx-price-down {
+  color: var(--kx-short);
+}
+
+.kx-price-flash-up {
+  animation: kx-flash-green 0.5s ease;
+}
+
+.kx-price-flash-down {
+  animation: kx-flash-red 0.5s ease;
+}
+
+@keyframes kx-flash-green {
+  0% { background: rgba(0, 212, 170, 0.3); }
+  100% { background: transparent; }
+}
+
+@keyframes kx-flash-red {
+  0% { background: rgba(255, 71, 87, 0.3); }
+  100% { background: transparent; }
+}
+
+/* ─── Data Grid ──────────────────────────────────────────────────────────── */
+
+.kx-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.kx-table th {
+  text-align: left;
+  padding: 12px 16px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--kx-text-muted);
+  border-bottom: 1px solid var(--kx-border);
+}
+
+.kx-table td {
+  padding: 12px 16px;
+  font-size: 14px;
+  border-bottom: 1px solid var(--kx-glass-border);
+}
+
+.kx-table tr:hover td {
+  background: var(--kx-bg-card-hover);
+}
+
+/* ─── Sidebar ────────────────────────────────────────────────────────────── */
+
+.kx-sidebar {
+  width: var(--kx-sidebar-width);
+  background: var(--kx-bg-secondary);
+  border-right: 1px solid var(--kx-glass-border);
+  transition: width 0.3s ease;
+}
+
+.kx-sidebar.collapsed {
+  width: var(--kx-sidebar-collapsed);
+}
+
+/* ─── Responsive ─────────────────────────────────────────────────────────── */
+
+@media (max-width: 768px) {
+  .kx-sidebar {
+    position: fixed;
+    z-index: 50;
+    transform: translateX(-100%);
+    transition: transform 0.3s ease;
+  }
+
+  .kx-sidebar.open {
+    transform: translateX(0);
+  }
+}
