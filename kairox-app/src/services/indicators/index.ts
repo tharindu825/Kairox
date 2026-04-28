@@ -46,16 +46,16 @@ export class IndicatorService {
    * Updates all indicators with a new closed candle.
    */
   update(candle: NormalizedCandle) {
-    this.rsi.update(candle.close);
-    this.macd.update(candle.close);
-    this.ema20.update(candle.close);
-    this.ema50.update(candle.close);
-    this.ema200.update(candle.close);
+    this.rsi.update(candle.close, false);
+    this.macd.update(candle.close, false);
+    this.ema20.update(candle.close, false);
+    this.ema50.update(candle.close, false);
+    this.ema200.update(candle.close, false);
     
     // ATR requires High, Low, Close
-    this.atr.update({ high: candle.high, low: candle.low, close: candle.close });
+    this.atr.update({ high: candle.high, low: candle.low, close: candle.close }, false);
     
-    this.bb.update(candle.close);
+    this.bb.update(candle.close, false);
   }
 
   /**

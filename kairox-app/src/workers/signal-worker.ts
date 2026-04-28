@@ -5,11 +5,75 @@ import { indicatorService, FeatureBundle } from '@/services/indicators';
 import { openRouterService } from '@/services/ai/openrouter-service';
 import { openAIService } from '@/services/ai/openai-service';
 import { riskEngine, PortfolioState } from '@/services/risk-engine';
+import { paperTradingService } from '@/services/paper-trading';
 import { alertQueue } from './queues';
 import { NormalizedCandle } from '@/services/market-data/binance';
+import { Decimal } from 'decimal.js';
 
 export interface SignalJobData {
   candle: NormalizedCandle;
+}
+
+/**
+ * Build real portfolio state from the database
+ */
+async function getPortfolioState(): Promise<PortfolioState> {
+  const PAPER_BALANCE = 10000;
+
+  // Count open trades
+  const openOrders = await db.paperOrder.findMany({
+    where: { status: 'OPEN' },
+    include: { signal: { include: { asset: true, riskAssessment: true } } },
+  });
+
+  const openTrades = openOrders.length;
+
+  // Sum risk exposure
+  const openRiskPercent = openOrders.reduce((sum, o) => {
+    return sum + (o.signal.riskAssessment?.riskPercent || 0);
+  }, 0);
+
+  // Daily P&L
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+
+  const closedToday = await db.paperOrder.findMany({
+    where: { closedAt: { gte: todayStart }, status: { in: ['CLOSED', 'STOPPED'] } },
+  });
+
+  const dailyPnL = closedToday.reduce((sum, o) => sum + (o.pnl ? new Decimal(o.pnl).toNumber() : 0), 0);
+  const dailyPnLPercent = PAPER_BALANCE > 0 ? (dailyPnL / PAPER_BALANCE) * 100 : 0;
+
+  // Correlated assets
+  const correlatedAssets = openOrders.map(o => o.signal.asset.symbol);
+
+  // Consecutive stop-outs
+  const recentOrders = await db.paperOrder.findMany({
+    where: { status: { in: ['CLOSED', 'STOPPED'] } },
+    orderBy: { closedAt: 'desc' },
+    take: 10,
+  });
+
+  let consecutiveStopOuts = 0;
+  let lastStopOutTime: Date | undefined;
+  for (const order of recentOrders) {
+    if (order.status === 'STOPPED') {
+      consecutiveStopOuts++;
+      if (!lastStopOutTime && order.closedAt) lastStopOutTime = order.closedAt;
+    } else {
+      break;
+    }
+  }
+
+  return {
+    balance: PAPER_BALANCE,
+    openTrades,
+    openRiskPercent,
+    dailyPnLPercent,
+    correlatedAssets,
+    consecutiveStopOuts,
+    lastStopOutTime,
+  };
 }
 
 export const signalWorker = new Worker(
@@ -50,18 +114,11 @@ export const signalWorker = new Worker(
       const isAgreement = primarySignal.side === confSignal.side;
       console.log(`[Signal Worker] Model Agreement: ${isAgreement} (${primarySignal.side} vs ${confSignal.side})`);
 
-      // 4. Portfolio State Mock (In production, calculate from DB)
-      const mockPortfolio: PortfolioState = {
-        balance: 10000,
-        openTrades: 1,
-        openRiskPercent: 1.5,
-        dailyPnLPercent: 0.5,
-        correlatedAssets: [],
-        consecutiveStopOuts: 0,
-      };
+      // 4. Get Real Portfolio State from DB
+      const portfolio = await getPortfolioState();
 
       // 5. Risk Engine Validation (always use Primary signal metrics for risk calc)
-      const riskAssessment = riskEngine.assess(primarySignal, mockPortfolio, candle.symbol);
+      const riskAssessment = riskEngine.assess(primarySignal, portfolio, candle.symbol);
 
       // Force BLOCKED if models disagree completely (e.g. LONG vs SHORT)
       if (primarySignal.side !== 'HOLD' && confSignal.side !== 'HOLD' && !isAgreement) {
@@ -73,6 +130,10 @@ export const signalWorker = new Worker(
       const asset = await db.asset.findUnique({ where: { symbol: candle.symbol } });
       if (!asset) throw new Error('Asset not found');
 
+      const signalStatus = riskAssessment.verdict === 'APPROVED' || riskAssessment.verdict === 'REDUCED'
+        ? 'APPROVED'
+        : 'BLOCKED';
+
       const signalRecord = await db.signal.create({
         data: {
           assetId: asset.id,
@@ -83,9 +144,7 @@ export const signalWorker = new Worker(
           stopLoss: primarySignal.stopLoss,
           targets: primarySignal.targets,
           reasoning: primarySignal.reasoning,
-          status: riskAssessment.verdict === 'APPROVED' || riskAssessment.verdict === 'REDUCED' 
-            ? 'APPROVED' 
-            : 'BLOCKED',
+          status: signalStatus,
           riskAssessment: {
             create: {
               positionSize: riskAssessment.positionSize,
@@ -101,26 +160,26 @@ export const signalWorker = new Worker(
             createMany: {
               data: [
                 {
-                  modelId: 'anthropic/claude-sonnet-4',
+                  modelId: process.env.PRIMARY_MODEL || 'anthropic/claude-sonnet-4',
                   apiProvider: 'OPENROUTER',
                   role: 'PRIMARY',
                   side: primarySignal.side,
                   confidence: primarySignal.confidence,
                   reasoning: primarySignal.reasoning,
                   rawResponse: primarySignal as any,
-                  latencyMs: 1500, // Mock latency
-                  tokenUsage: { prompt: 500, completion: 200, total: 700 }
+                  latencyMs: primaryResult.latencyMs || 0,
+                  tokenUsage: primaryResult.tokenUsage || { prompt: 0, completion: 0, total: 0 },
                 },
                 {
-                  modelId: 'gpt-4o',
+                  modelId: process.env.CONFIRMATION_MODEL || 'gpt-4o',
                   apiProvider: 'OPENAI',
                   role: 'CONFIRMATION',
                   side: confSignal.side,
                   confidence: confSignal.confidence,
                   reasoning: confSignal.reasoning,
                   rawResponse: confSignal as any,
-                  latencyMs: 1200, // Mock latency
-                  tokenUsage: { prompt: 500, completion: 200, total: 700 }
+                  latencyMs: confirmationResult.latencyMs || 0,
+                  tokenUsage: confirmationResult.tokenUsage || { prompt: 0, completion: 0, total: 0 },
                 }
               ]
             }
@@ -130,11 +189,24 @@ export const signalWorker = new Worker(
 
       console.log(`[Signal Worker] Signal created: ${signalRecord.id} (Verdict: ${riskAssessment.verdict})`);
 
-      // 7. Dispatch Alert if Approved
-      if (signalRecord.status === 'APPROVED') {
+      // 7. Auto-execute Paper Trade if Approved
+      if (signalStatus === 'APPROVED' && riskAssessment.positionSize > 0) {
+        try {
+          await paperTradingService.executeApprovedSignal(
+            signalRecord.id,
+            riskAssessment.positionSize
+          );
+          console.log(`[Signal Worker] Paper trade opened for signal ${signalRecord.id}`);
+        } catch (err) {
+          console.error(`[Signal Worker] Failed to open paper trade:`, err);
+        }
+      }
+
+      // 8. Dispatch Alert if Approved
+      if (signalStatus === 'APPROVED') {
         await alertQueue.add('send-telegram', {
           signalId: signalRecord.id,
-          message: `🚨 NEW APPROVED SIGNAL 🚨\n\nAsset: ${candle.symbol}\nSide: ${primarySignal.side}\nEntry: ${primarySignal.entry}\nStop: ${primarySignal.stopLoss}`
+          message: `🚨 NEW APPROVED SIGNAL 🚨\n\nAsset: ${candle.symbol}\nSide: ${primarySignal.side}\nConfidence: ${(primarySignal.confidence * 100).toFixed(0)}%\nEntry: ${primarySignal.entry}\nStop: ${primarySignal.stopLoss}\nTarget: ${primarySignal.targets[0]?.price}\nR:R: ${riskAssessment.rewardToRisk.toFixed(2)}\nSize: ${riskAssessment.positionSize.toFixed(4)} units\n\nModels: ${isAgreement ? '✅ Agree' : '⚠️ Disagree'}`
         });
       }
 

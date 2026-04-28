@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -36,7 +36,32 @@ export default function DashboardLayout({
 }) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [notifications, setNotifications] = useState<any[]>([]);
+  const [showNotifs, setShowNotifs] = useState(false);
+  const [connected, setConnected] = useState(false);
   const pathname = usePathname();
+  const eventSourceRef = useRef<EventSource | null>(null);
+
+  // SSE notification connection
+  useEffect(() => {
+    const es = new EventSource('/api/notifications/stream');
+    eventSourceRef.current = es;
+
+    es.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.type === 'connected') {
+          setConnected(true);
+        } else if (data.type === 'signal') {
+          setNotifications(prev => [data, ...prev].slice(0, 20));
+        }
+      } catch {}
+    };
+
+    es.onerror = () => setConnected(false);
+
+    return () => { es.close(); };
+  }, []);
 
   return (
     <div className="flex h-screen overflow-hidden" style={{ background: 'var(--kx-bg-primary)' }}>
@@ -189,12 +214,48 @@ export default function DashboardLayout({
           </div>
 
           <div className="flex items-center gap-2">
-            <button className="relative p-2 rounded-lg hover:bg-white/5 transition-colors"
-                    style={{ color: 'var(--kx-text-muted)' }}>
-              <Bell className="w-5 h-5" />
-              <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full"
-                    style={{ background: 'var(--kx-accent)' }} />
-            </button>
+            <div className="relative">
+              <button onClick={() => setShowNotifs(!showNotifs)}
+                className="relative p-2 rounded-lg hover:bg-white/5 transition-colors"
+                style={{ color: 'var(--kx-text-muted)' }}>
+                <Bell className="w-5 h-5" />
+                {notifications.length > 0 && (
+                  <span className="absolute top-1 right-1 w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold"
+                        style={{ background: 'var(--kx-accent)', color: 'white' }}>
+                    {notifications.length}
+                  </span>
+                )}
+              </button>
+
+              {/* Notification Dropdown */}
+              <AnimatePresence>
+                {showNotifs && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -10, scale: 0.95 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: -10, scale: 0.95 }}
+                    className="absolute right-0 top-full mt-2 w-80 max-h-80 overflow-y-auto rounded-xl z-50"
+                    style={{ background: 'var(--kx-bg-card)', border: '1px solid var(--kx-border)' }}
+                  >
+                    <div className="p-3 flex items-center justify-between" style={{ borderBottom: '1px solid var(--kx-glass-border)' }}>
+                      <span className="text-sm font-semibold" style={{ color: 'var(--kx-text-primary)' }}>Notifications</span>
+                      {notifications.length > 0 && (
+                        <button onClick={() => setNotifications([])} className="text-xs" style={{ color: 'var(--kx-accent)' }}>Clear</button>
+                      )}
+                    </div>
+                    {notifications.length === 0 ? (
+                      <div className="p-6 text-center text-sm" style={{ color: 'var(--kx-text-muted)' }}>No notifications yet</div>
+                    ) : (
+                      notifications.map((n, i) => (
+                        <div key={i} className="p-3 text-sm" style={{ borderBottom: '1px solid var(--kx-glass-border)', color: 'var(--kx-text-secondary)' }}>
+                          {n.message || 'New signal generated'}
+                        </div>
+                      ))
+                    )}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
 
             <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold"
                  style={{ background: 'linear-gradient(135deg, #3b82f6, #00d4aa)', color: 'white' }}>

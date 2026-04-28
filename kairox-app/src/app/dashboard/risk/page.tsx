@@ -2,12 +2,26 @@
 
 import useSWR from 'swr';
 import { motion } from 'framer-motion';
-import { ShieldAlert, AlertTriangle, Crosshair, TrendingDown, Clock, ShieldCheck, FileWarning, Loader2 } from 'lucide-react';
+import {
+  ShieldAlert, AlertTriangle, Crosshair, TrendingDown, Clock, ShieldCheck,
+  FileWarning, Loader2, DollarSign, Target, ArrowUpRight, ArrowDownRight,
+} from 'lucide-react';
 
 const fetcher = (url: string) => fetch(url).then((res) => res.json());
 
+function timeAgo(date: Date | string): string {
+  const d = new Date(date);
+  const seconds = Math.floor((Date.now() - d.getTime()) / 1000);
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours}h ago`;
+}
+
 export default function RiskPage() {
   const { data, error, isLoading } = useSWR('/api/risk', fetcher, { refreshInterval: 5000 });
+  const { data: paperData } = useSWR('/api/paper-trades', fetcher, { refreshInterval: 5000 });
 
   return (
     <div className="space-y-6">
@@ -23,6 +37,7 @@ export default function RiskPage() {
         </div>
       ) : (
         <>
+          {/* Risk Metric Cards */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="kx-card p-5">
               <div className="flex justify-between items-start mb-2">
@@ -31,21 +46,26 @@ export default function RiskPage() {
               </div>
               <div className="text-2xl font-bold font-mono mb-1" style={{ color: 'var(--kx-text-primary)' }}>{data?.metrics.capitalAtRisk}%</div>
               <div className="w-full bg-black/20 rounded-full h-1.5 mt-3">
-                <div className="h-1.5 rounded-full" style={{ width: `${((data?.metrics.capitalAtRisk || 0) / (data?.metrics.maxCapitalRisk || 1)) * 100}%`, background: 'var(--kx-warning)' }} />
+                <div className="h-1.5 rounded-full transition-all" style={{ width: `${Math.min(((data?.metrics.capitalAtRisk || 0) / (data?.metrics.maxCapitalRisk || 1)) * 100, 100)}%`, background: 'var(--kx-warning)' }} />
               </div>
               <div className="text-xs mt-2 text-right" style={{ color: 'var(--kx-text-muted)' }}>Max {data?.metrics.maxCapitalRisk}%</div>
             </motion.div>
 
             <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }} className="kx-card p-5">
               <div className="flex justify-between items-start mb-2">
-                <span className="text-sm font-medium" style={{ color: 'var(--kx-text-muted)' }}>Daily Drawdown</span>
-                <TrendingDown className="w-4 h-4" style={{ color: 'var(--kx-short)' }} />
+                <span className="text-sm font-medium" style={{ color: 'var(--kx-text-muted)' }}>Daily P&L</span>
+                <TrendingDown className="w-4 h-4" style={{ color: (data?.metrics.dailyPnL || 0) >= 0 ? 'var(--kx-long)' : 'var(--kx-short)' }} />
               </div>
-              <div className="text-2xl font-bold font-mono mb-1" style={{ color: 'var(--kx-short)' }}>{data?.metrics.dailyDrawdown}%</div>
+              <div className="text-2xl font-bold font-mono mb-1" style={{ color: (data?.metrics.dailyPnL || 0) >= 0 ? 'var(--kx-long)' : 'var(--kx-short)' }}>
+                {(data?.metrics.dailyPnL || 0) >= 0 ? '+' : ''}${data?.metrics.dailyPnL || 0}
+              </div>
               <div className="w-full bg-black/20 rounded-full h-1.5 mt-3">
-                <div className="h-1.5 rounded-full" style={{ width: `${((data?.metrics.dailyDrawdown || 0) / (data?.metrics.maxDrawdown || -1)) * 100}%`, background: 'var(--kx-short)' }} />
+                <div className="h-1.5 rounded-full transition-all" style={{
+                  width: `${Math.min(Math.abs(data?.metrics.dailyDrawdown || 0) / (Math.abs(data?.metrics.maxDrawdown || 5)) * 100, 100)}%`,
+                  background: 'var(--kx-short)'
+                }} />
               </div>
-              <div className="text-xs mt-2 text-right" style={{ color: 'var(--kx-text-muted)' }}>Limit {data?.metrics.maxDrawdown}%</div>
+              <div className="text-xs mt-2 text-right" style={{ color: 'var(--kx-text-muted)' }}>DD Limit {data?.metrics.maxDrawdown}%</div>
             </motion.div>
 
             <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="kx-card p-5">
@@ -55,30 +75,91 @@ export default function RiskPage() {
               </div>
               <div className="text-2xl font-bold font-mono mb-1" style={{ color: 'var(--kx-text-primary)' }}>{data?.metrics.openTrades} <span className="text-sm" style={{ color: 'var(--kx-text-muted)' }}>/ {data?.metrics.maxOpenTrades}</span></div>
               <div className="w-full bg-black/20 rounded-full h-1.5 mt-3">
-                <div className="h-1.5 rounded-full" style={{ width: `${((data?.metrics.openTrades || 0) / (data?.metrics.maxOpenTrades || 1)) * 100}%`, background: 'var(--kx-accent)' }} />
+                <div className="h-1.5 rounded-full transition-all" style={{ width: `${((data?.metrics.openTrades || 0) / (data?.metrics.maxOpenTrades || 1)) * 100}%`, background: 'var(--kx-accent)' }} />
               </div>
               <div className="text-xs mt-2 text-right" style={{ color: 'var(--kx-text-muted)' }}>Capacity</div>
             </motion.div>
 
             <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }} className="kx-card p-5">
               <div className="flex justify-between items-start mb-2">
-                <span className="text-sm font-medium" style={{ color: 'var(--kx-text-muted)' }}>Correlation Exposure</span>
-                <AlertTriangle className="w-4 h-4" style={{ color: 'var(--kx-text-primary)' }} />
+                <span className="text-sm font-medium" style={{ color: 'var(--kx-text-muted)' }}>Win Rate</span>
+                <Target className="w-4 h-4" style={{ color: 'var(--kx-success)' }} />
               </div>
-              <div className="text-2xl font-bold font-mono mb-1" style={{ color: 'var(--kx-text-primary)' }}>{data?.metrics.correlatedPairs} <span className="text-sm" style={{ color: 'var(--kx-text-muted)' }}>/ {data?.metrics.maxCorrelated}</span></div>
-              <div className="w-full bg-black/20 rounded-full h-1.5 mt-3">
-                <div className="h-1.5 rounded-full" style={{ width: `${((data?.metrics.correlatedPairs || 0) / (data?.metrics.maxCorrelated || 1)) * 100}%`, background: 'var(--kx-text-primary)' }} />
+              <div className="text-2xl font-bold font-mono mb-1" style={{ color: 'var(--kx-text-primary)' }}>
+                {paperData?.stats?.winRate || 0}%
               </div>
-              <div className="text-xs mt-2 text-right" style={{ color: 'var(--kx-text-muted)' }}>Max Pairs</div>
+              <div className="text-xs mt-3" style={{ color: 'var(--kx-text-muted)' }}>
+                W: {paperData?.stats?.wins || 0} / L: {paperData?.stats?.losses || 0} ({paperData?.stats?.totalTrades || 0} total)
+              </div>
             </motion.div>
           </div>
 
+          {/* Paper Trades + Blocked Signals + System Status */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            {/* Paper Trades Table */}
             <div className="lg:col-span-2 space-y-4">
               <h3 className="font-semibold flex items-center gap-2" style={{ color: 'var(--kx-text-primary)' }}>
+                <DollarSign className="w-4 h-4" /> Paper Trades
+              </h3>
+
+              <div className="kx-card overflow-hidden">
+                <table className="kx-table">
+                  <thead>
+                    <tr>
+                      <th>Asset</th>
+                      <th>Side</th>
+                      <th>Entry</th>
+                      <th>Status</th>
+                      <th>P&L</th>
+                      <th>Time</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(!paperData?.orders || paperData.orders.length === 0) && (
+                      <tr>
+                        <td colSpan={6} className="text-center py-8" style={{ color: 'var(--kx-text-muted)' }}>
+                          <DollarSign className="w-6 h-6 mx-auto mb-2 opacity-30" />
+                          No paper trades yet
+                        </td>
+                      </tr>
+                    )}
+                    {paperData?.orders?.slice(0, 15).map((order: any) => (
+                      <tr key={order.id}>
+                        <td className="font-mono text-sm font-medium">{order.symbol}</td>
+                        <td>
+                          <span className={`${order.side === 'LONG' ? 'kx-badge-long' : 'kx-badge-short'} px-2 py-0.5 rounded text-xs font-bold`}>
+                            {order.side === 'LONG' ? <ArrowUpRight className="w-3 h-3 inline mr-0.5" /> : <ArrowDownRight className="w-3 h-3 inline mr-0.5" />}
+                            {order.side}
+                          </span>
+                        </td>
+                        <td className="font-mono text-xs">${order.entryPrice?.toLocaleString()}</td>
+                        <td>
+                          <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                            order.status === 'OPEN' ? 'kx-badge-long' :
+                            order.status === 'CLOSED' ? 'kx-verdict-approved' :
+                            order.status === 'STOPPED' ? 'kx-verdict-blocked' : ''
+                          }`}>
+                            {order.status}
+                          </span>
+                        </td>
+                        <td className="font-mono text-sm" style={{
+                          color: order.pnl != null ? (order.pnl >= 0 ? 'var(--kx-long)' : 'var(--kx-short)') : 'var(--kx-text-muted)'
+                        }}>
+                          {order.pnl != null ? `${order.pnl >= 0 ? '+' : ''}$${order.pnl.toFixed(2)}` : '—'}
+                        </td>
+                        <td className="text-xs" style={{ color: 'var(--kx-text-muted)' }}>
+                          {timeAgo(order.openedAt)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Blocked Signals */}
+              <h3 className="font-semibold flex items-center gap-2 mt-6" style={{ color: 'var(--kx-text-primary)' }}>
                 <FileWarning className="w-4 h-4" /> Blocked Signals Log
               </h3>
-              
               <div className="space-y-3">
                 {data?.blockedSignals?.length === 0 ? (
                   <div className="kx-card p-8 text-center" style={{ color: 'var(--kx-text-muted)' }}>
@@ -93,7 +174,7 @@ export default function RiskPage() {
                           <span className="font-mono font-bold">{signal.asset.symbol}</span>
                           <span className="kx-badge-short px-2 py-0.5 rounded text-xs">{signal.side}</span>
                         </div>
-                        <span className="text-xs" style={{ color: 'var(--kx-text-muted)' }}>Just now</span>
+                        <span className="text-xs" style={{ color: 'var(--kx-text-muted)' }}>{timeAgo(signal.createdAt)}</span>
                       </div>
                       <div className="text-sm" style={{ color: 'var(--kx-text-secondary)' }}>
                         <span className="font-semibold" style={{ color: 'var(--kx-short)' }}>Blocked:</span> {signal.riskAssessment?.reasons?.[0] || 'Risk limit exceeded'}
@@ -104,11 +185,26 @@ export default function RiskPage() {
               </div>
             </div>
 
+            {/* System Status */}
             <div className="space-y-4">
               <h3 className="font-semibold flex items-center gap-2" style={{ color: 'var(--kx-text-primary)' }}>
                 <Clock className="w-4 h-4" /> System Status
               </h3>
               <div className="kx-card p-5 space-y-4">
+                <div>
+                  <div className="text-sm mb-1" style={{ color: 'var(--kx-text-muted)' }}>Paper Balance</div>
+                  <div className="font-mono text-lg font-bold" style={{ color: 'var(--kx-text-primary)' }}>
+                    ${(data?.metrics.paperBalance || 10000).toLocaleString()}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-sm mb-1" style={{ color: 'var(--kx-text-muted)' }}>Total P&L</div>
+                  <div className="font-mono font-bold" style={{
+                    color: (paperData?.stats?.totalPnL || 0) >= 0 ? 'var(--kx-long)' : 'var(--kx-short)'
+                  }}>
+                    {(paperData?.stats?.totalPnL || 0) >= 0 ? '+' : ''}${paperData?.stats?.totalPnL || 0}
+                  </div>
+                </div>
                 <div>
                   <div className="text-sm mb-1" style={{ color: 'var(--kx-text-muted)' }}>Stop-Out Streak</div>
                   <div className="font-mono">{data?.metrics.consecutiveStops} / 3 trades</div>
@@ -117,7 +213,7 @@ export default function RiskPage() {
                   <div className="text-sm mb-1" style={{ color: 'var(--kx-text-muted)' }}>Cooldown Status</div>
                   {data?.metrics.cooldownActive ? (
                     <div className="text-sm font-medium flex items-center gap-2" style={{ color: 'var(--kx-warning)' }}>
-                      <AlertTriangle className="w-4 h-4" /> Active (45m remaining)
+                      <AlertTriangle className="w-4 h-4" /> Active — Trading Paused
                     </div>
                   ) : (
                     <div className="text-sm font-medium flex items-center gap-2" style={{ color: 'var(--kx-success)' }}>

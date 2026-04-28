@@ -1,5 +1,4 @@
 @import "tailwindcss";
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
 
 /* ─── Kairox Trading Theme ──────────────────────────────────────────────── */
 
@@ -342,5 +341,43 @@ body {
 
   .kx-sidebar.open {
     transform: translateX(0);
+  }
+
+  /* Ensure tables scroll horizontally on mobile */
+  .kx-table {
+    display: block;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    font-size: 0.75rem;
+  }
+
+  .kx-table th,
+  .kx-table td {
+    padding: 0.5rem 0.75rem;
+    white-space: nowrap;
+  }
+
+  /* Touch-friendly button sizes */
+  .kx-btn {
+    min-height: 44px;
+    padding: 0.625rem 1rem;
+  }
+
+  /* Ensure inputs are at least 44px tall for touch */
+  .kx-input {
+    min-height: 44px;
+    font-size: 16px; /* Prevents iOS zoom on focus */
+  }
+
+  /* Card padding adjustments */
+  .kx-card {
+    border-radius: 0.75rem;
+  }
+}
+
+@media (max-width: 480px) {
+  /* Reduce font sizes for very small screens */
+  .font-mono {
+    font-size: 0.8em;
   }
 }
