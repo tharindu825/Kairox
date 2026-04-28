@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import useSWR from 'swr';
 import { motion } from 'framer-motion';
 import {
@@ -20,8 +21,30 @@ function timeAgo(date: Date | string): string {
 }
 
 export default function RiskPage() {
-  const { data, error, isLoading } = useSWR('/api/risk', fetcher, { refreshInterval: 5000 });
-  const { data: paperData } = useSWR('/api/paper-trades', fetcher, { refreshInterval: 5000 });
+  const { data, error, isLoading, mutate: mutateRisk } = useSWR('/api/risk', fetcher, { refreshInterval: 5000 });
+  const { data: paperData, mutate: mutatePaper } = useSWR('/api/paper-trades', fetcher, { refreshInterval: 5000 });
+  const [isKilling, setIsKilling] = useState(false);
+
+  const executeKillSwitch = async () => {
+    if (!window.confirm('Are you sure you want to trigger the emergency kill switch? This will close all open paper trades and block all pending signals.')) return;
+    
+    setIsKilling(true);
+    try {
+      const res = await fetch('/api/risk/kill-switch', { method: 'POST' });
+      if (res.ok) {
+        alert('Kill switch executed successfully.');
+        mutateRisk();
+        mutatePaper();
+      } else {
+        alert('Failed to execute kill switch.');
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Error executing kill switch.');
+    } finally {
+      setIsKilling(false);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -223,8 +246,13 @@ export default function RiskPage() {
                 </div>
                 
                 <div className="pt-4 mt-4 border-t" style={{ borderColor: 'var(--kx-border)' }}>
-                  <button className="w-full kx-btn py-2 rounded-lg font-medium" style={{ background: 'rgba(255,71,87,0.1)', color: 'var(--kx-short)' }}>
-                    Trigger Emergency Kill Switch
+                  <button 
+                    onClick={executeKillSwitch} 
+                    disabled={isKilling}
+                    className="w-full kx-btn py-2 rounded-lg font-medium" 
+                    style={{ background: 'rgba(255,71,87,0.1)', color: 'var(--kx-short)', opacity: isKilling ? 0.7 : 1 }}
+                  >
+                    {isKilling ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : 'Trigger Emergency Kill Switch'}
                   </button>
                   <p className="text-xs mt-2 text-center" style={{ color: 'var(--kx-text-muted)' }}>
                     Instantly closes all paper trades and halts AI generation.

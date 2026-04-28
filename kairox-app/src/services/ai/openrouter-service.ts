@@ -48,12 +48,20 @@ export class OpenRouterService {
   private baseUrl: string;
   private model: string;
   private fallbackModel: string;
+  private role: 'PRIMARY' | 'CONFIRMATION';
 
-  constructor() {
+  constructor(role: 'PRIMARY' | 'CONFIRMATION' = 'PRIMARY') {
+    this.role = role;
     this.apiKey = process.env.OPENROUTER_API_KEY || '';
     this.baseUrl = process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1';
-    this.model = process.env.PRIMARY_MODEL || 'anthropic/claude-sonnet-4';
-    this.fallbackModel = process.env.PRIMARY_FALLBACK_MODEL || 'google/gemini-2.5-pro';
+    
+    if (role === 'PRIMARY') {
+      this.model = process.env.PRIMARY_MODEL || 'anthropic/claude-sonnet-4';
+      this.fallbackModel = process.env.PRIMARY_FALLBACK_MODEL || 'google/gemini-2.5-pro';
+    } else {
+      this.model = process.env.CONFIRMATION_MODEL || 'meta-llama/llama-3-70b-instruct';
+      this.fallbackModel = process.env.CONFIRMATION_FALLBACK_MODEL || 'anthropic/claude-3-haiku';
+    }
   }
 
   async generateCompletion(
@@ -155,6 +163,20 @@ export class OpenRouterService {
   }
 
   private buildSystemPrompt(): string {
+    if (this.role === 'CONFIRMATION') {
+      return `You are a professional quantitative trading analyst providing confirmation analysis. You independently analyze technical indicators, market structure, and price action to generate structured trading signals.
+
+RULES:
+1. Always respond with a valid JSON object matching the exact schema provided.
+2. Confidence must be between 0.0 and 1.0, where 0.7+ indicates a strong setup.
+3. If evidence is mixed or insufficient, return side: "HOLD" with reasoning.
+4. Stop loss must respect ATR and market structure.
+5. Targets must have a minimum reward-to-risk ratio of 1.5:1.
+6. Invalidation describes what would make this signal wrong.
+7. Be specific about key factors — reference actual indicator values.
+8. You are acting as an INDEPENDENT confirmation model. Form your own view.`;
+    }
+
     return `You are a professional quantitative trading analyst. You analyze technical indicators, market structure, and price action to generate structured trading signals.
 
 RULES:
@@ -209,4 +231,5 @@ Generate a trading signal as a JSON object.`;
   }
 }
 
-export const openRouterService = new OpenRouterService();
+export const openRouterService = new OpenRouterService('PRIMARY');
+export const openRouterConfirmationService = new OpenRouterService('CONFIRMATION');

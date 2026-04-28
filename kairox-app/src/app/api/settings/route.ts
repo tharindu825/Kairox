@@ -40,12 +40,12 @@ export async function GET() {
         },
         {
           id: 'default-confirmation',
-          modelId: process.env.CONFIRMATION_MODEL || 'gpt-4o',
-          apiProvider: 'openai',
+          modelId: process.env.CONFIRMATION_MODEL || 'meta-llama/llama-3-70b-instruct',
+          apiProvider: 'openrouter',
           role: 'CONFIRMATION',
           isActive: true,
           parameters: { temperature: 0.3, maxTokens: 2000 },
-          fallback: process.env.CONFIRMATION_FALLBACK_MODEL || 'gpt-4o-mini',
+          fallback: process.env.CONFIRMATION_FALLBACK_MODEL || 'anthropic/claude-3-haiku',
         },
       ],
       alerts: {
@@ -81,6 +81,10 @@ const updateModelsSchema = z.object({
     temperature: z.number().min(0).max(2),
     maxTokens: z.number().int().min(100).max(8000),
   }).optional(),
+});
+
+const updateAlertsSchema = z.object({
+  minConfidence: z.number().min(0).max(1),
 });
 
 export async function PUT(request: Request) {
@@ -164,6 +168,13 @@ export async function PUT(request: Request) {
       }
 
       return NextResponse.json({ message: 'Model configuration updated' });
+    }
+
+    if (type === 'alerts') {
+      const validated = updateAlertsSchema.parse(body.data);
+      // In a real application, we would save this to the DB.
+      // For now, since settings returned are mocked for alerts, we just return success.
+      return NextResponse.json({ message: 'Alert configuration updated', data: validated });
     }
 
     return NextResponse.json({ error: 'Unknown settings type' }, { status: 400 });

@@ -12,9 +12,8 @@ const envSchema = z.object({
   NEXTAUTH_URL: z.string().url().optional(),
 
   // AI APIs
-  OPENROUTER_API_KEY: z.string().min(1),
+  OPENROUTER_API_KEY: z.string().optional(),
   OPENROUTER_BASE_URL: z.string().url().default('https://openrouter.ai/api/v1'),
-  OPENAI_API_KEY: z.string().min(1),
 
   // Models
   PRIMARY_MODEL: z.string().default('anthropic/claude-sonnet-4'),

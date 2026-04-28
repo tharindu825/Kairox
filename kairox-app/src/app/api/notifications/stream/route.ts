@@ -1,8 +1,28 @@
 import { NextResponse } from 'next/server';
 import { redis } from '@/lib/redis';
+import Redis from 'ioredis';
 
-// In-memory client tracking (for single-instance deployments)
+// Use a separate connection for subscribing
+const subscriber = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
+
 const clients = new Set<ReadableStreamDefaultController>();
+
+subscriber.subscribe('kairox:notifications', (err, count) => {
+  if (err) {
+    console.error('[SSE] Failed to subscribe to notifications channel:', err);
+  }
+});
+
+subscriber.on('message', (channel, message) => {
+  if (channel === 'kairox:notifications') {
+    try {
+      const data = JSON.parse(message);
+      notifyClients(data);
+    } catch (err) {
+      console.error('[SSE] Failed to parse notification message:', err);
+    }
+  }
+});
 
 export function notifyClients(data: any) {
   const message = `data: ${JSON.stringify(data)}\n\n`;

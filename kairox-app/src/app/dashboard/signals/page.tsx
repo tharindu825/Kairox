@@ -38,11 +38,26 @@ export default function SignalsPage() {
   const [searchQuery, setSearchQuery] = useState('');
 
   // Fetch signals from API
-  const { data: signals, error, isLoading } = useSWR<any[]>(
+  const { data: signals, error, isLoading, mutate } = useSWR<any[]>(
     `/api/signals?asset=${filterAsset}&status=${filterStatus}&side=${filterSide}`, 
     fetcher,
     { refreshInterval: 5000 } // Poll every 5s
   );
+
+  const updateSignalStatus = async (id: string, newStatus: 'APPROVED' | 'BLOCKED') => {
+    try {
+      const res = await fetch(`/api/signals/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: newStatus })
+      });
+      if (res.ok) {
+        mutate();
+      }
+    } catch (err) {
+      console.error('Failed to update signal status', err);
+    }
+  };
 
   const filtered = (signals || []).filter(s => {
     if (searchQuery && !s.asset.symbol.toLowerCase().includes(searchQuery.toLowerCase())) return false;
@@ -187,10 +202,10 @@ export default function SignalsPage() {
                   {/* Actions */}
                   {signal.status === 'PENDING' && (
                     <div className="flex gap-2">
-                      <button className="kx-btn p-2 rounded-lg" style={{ background: 'rgba(0,212,170,0.12)', color: 'var(--kx-long)' }}>
+                      <button onClick={() => updateSignalStatus(signal.id, 'APPROVED')} className="kx-btn p-2 rounded-lg hover:scale-105" style={{ background: 'rgba(0,212,170,0.12)', color: 'var(--kx-long)' }}>
                         <ThumbsUp className="w-4 h-4" />
                       </button>
-                      <button className="kx-btn p-2 rounded-lg" style={{ background: 'rgba(255,71,87,0.12)', color: 'var(--kx-short)' }}>
+                      <button onClick={() => updateSignalStatus(signal.id, 'BLOCKED')} className="kx-btn p-2 rounded-lg hover:scale-105" style={{ background: 'rgba(255,71,87,0.12)', color: 'var(--kx-short)' }}>
                         <ThumbsDown className="w-4 h-4" />
                       </button>
                     </div>

@@ -2,13 +2,13 @@ import { Worker, Job } from 'bullmq';
 import { createBullMQConnection } from '@/lib/redis';
 import { db } from '@/lib/db';
 import { indicatorService, FeatureBundle } from '@/services/indicators';
-import { openRouterService } from '@/services/ai/openrouter-service';
-import { openAIService } from '@/services/ai/openai-service';
+import { openRouterService, openRouterConfirmationService } from '@/services/ai/openrouter-service';
 import { riskEngine, PortfolioState } from '@/services/risk-engine';
 import { paperTradingService } from '@/services/paper-trading';
 import { alertQueue } from './queues';
 import { NormalizedCandle } from '@/services/market-data/binance';
 import { Decimal } from 'decimal.js';
+import { publishNotification } from '@/lib/notify';
 
 export interface SignalJobData {
   candle: NormalizedCandle;
@@ -97,7 +97,7 @@ export const signalWorker = new Worker(
       console.log(`[Signal Worker] Requesting AI analysis for ${candle.symbol}...`);
       const [primaryResult, confirmationResult] = await Promise.all([
         openRouterService.generateCompletion(candle.symbol, candle.timeframe, features),
-        openAIService.generateCompletion(candle.symbol, candle.timeframe, features),
+        openRouterConfirmationService.generateCompletion(candle.symbol, candle.timeframe, features),
       ]);
 
       if (!primaryResult.success || !primaryResult.data) {
@@ -209,6 +209,12 @@ export const signalWorker = new Worker(
           message: `🚨 NEW APPROVED SIGNAL 🚨\n\nAsset: ${candle.symbol}\nSide: ${primarySignal.side}\nConfidence: ${(primarySignal.confidence * 100).toFixed(0)}%\nEntry: ${primarySignal.entry}\nStop: ${primarySignal.stopLoss}\nTarget: ${primarySignal.targets[0]?.price}\nR:R: ${riskAssessment.rewardToRisk.toFixed(2)}\nSize: ${riskAssessment.positionSize.toFixed(4)} units\n\nModels: ${isAgreement ? '✅ Agree' : '⚠️ Disagree'}`
         });
       }
+
+      // 9. Push SSE Notification to UI
+      await publishNotification({
+        type: 'NEW_SIGNAL',
+        data: signalRecord
+      });
 
       return { status: 'success', signalId: signalRecord.id };
 

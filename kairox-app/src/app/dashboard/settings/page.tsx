@@ -52,13 +52,51 @@ export default function SettingsPage() {
     });
   };
 
-  const handleSaveModels = (e: React.FormEvent<HTMLFormElement>) => {
+  const handleSaveModels = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    const f = new FormData(e.currentTarget);
-    saveTo('models', {
-      primary: { modelId: f.get('pm') as string, fallback: f.get('pf') as string, temperature: parseFloat(f.get('pt') as string), maxTokens: parseInt(f.get('ptk') as string) },
-      confirmation: { modelId: f.get('cm') as string, fallback: f.get('cf') as string, temperature: parseFloat(f.get('ct') as string), maxTokens: parseInt(f.get('ctk') as string) },
-    });
+    setSaving(true);
+    try {
+      const formData = new FormData(e.currentTarget);
+      const data = {
+        primary: {
+          modelId: formData.get('primary_modelId') as string,
+          fallback: formData.get('primary_fallback') as string,
+          temperature: parseFloat(formData.get('primary_temperature') as string),
+          maxTokens: parseInt(formData.get('primary_maxTokens') as string),
+        },
+        confirmation: {
+          modelId: formData.get('conf_modelId') as string,
+          fallback: formData.get('conf_fallback') as string,
+          temperature: parseFloat(formData.get('conf_temperature') as string),
+          maxTokens: parseInt(formData.get('conf_maxTokens') as string),
+        }
+      };
+      
+      const res = await fetch('/api/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'models', data })
+      });
+      if (res.ok) { showToast('Saved successfully', 'success'); mutate(); } else throw new Error();
+    } catch { showToast('Failed to save', 'error'); } finally { setSaving(false); }
+  };
+
+  const handleSaveAlerts = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      const formData = new FormData(e.currentTarget);
+      const data = {
+        minConfidence: parseFloat(formData.get('minConfidence') as string),
+      };
+      
+      const res = await fetch('/api/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'alerts', data })
+      });
+      if (res.ok) { showToast('Saved successfully', 'success'); mutate(); } else throw new Error();
+    } catch { showToast('Failed to save', 'error'); } finally { setSaving(false); }
   };
 
   const p = settings?.policy;
@@ -143,21 +181,21 @@ export default function SettingsPage() {
         )}
 
         {activeTab === 'alerts' && (
-          <div className="space-y-4">
+          <form onSubmit={handleSaveAlerts} className="space-y-4">
             <h3 className="font-semibold" style={{ color: 'var(--kx-text-primary)' }}>Alert Configuration</h3>
             <div className="flex items-center gap-2 p-3 rounded-lg" style={{ background: settings?.alerts?.telegramConfigured ? 'rgba(16,185,129,0.1)' : 'rgba(245,158,11,0.1)', color: settings?.alerts?.telegramConfigured ? 'var(--kx-success)' : 'var(--kx-warning)', border: `1px solid ${settings?.alerts?.telegramConfigured ? 'rgba(16,185,129,0.2)' : 'rgba(245,158,11,0.2)'}` }}>
               {settings?.alerts?.telegramConfigured ? <Check className="w-4 h-4" /> : <AlertTriangle className="w-4 h-4" />}
               <span className="text-sm">{settings?.alerts?.telegramConfigured ? 'Telegram connected' : 'Set TELEGRAM_BOT_TOKEN & TELEGRAM_CHAT_ID in .env'}</span>
             </div>
-            <div><label className="text-xs mb-1 block" style={{ color: 'var(--kx-text-muted)' }}>Min Confidence</label><input className="kx-input" type="number" step="0.05" defaultValue={0.7} /></div>
-          </div>
+            <div><label className="text-xs mb-1 block" style={{ color: 'var(--kx-text-muted)' }}>Min Confidence</label><input name="minConfidence" className="kx-input" type="number" step="0.05" defaultValue={settings?.alerts?.minConfidence || 0.7} /></div>
+            <button type="submit" disabled={saving} className="kx-btn kx-btn-primary">{saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} Save</button>
+          </form>
         )}
 
         {activeTab === 'api' && (
           <div className="space-y-4">
             <h3 className="font-semibold" style={{ color: 'var(--kx-text-primary)' }}>API Key Management</h3>
             <div><label className="text-xs mb-1 block" style={{ color: 'var(--kx-text-muted)' }}>OpenRouter</label><input className="kx-input" type="password" placeholder="OPENROUTER_API_KEY in .env" disabled /></div>
-            <div><label className="text-xs mb-1 block" style={{ color: 'var(--kx-text-muted)' }}>OpenAI</label><input className="kx-input" type="password" placeholder="OPENAI_API_KEY in .env" disabled /></div>
             <div className="p-3 rounded-lg text-xs" style={{ background: 'rgba(245,158,11,0.1)', color: 'var(--kx-warning)', border: '1px solid rgba(245,158,11,0.2)' }}>⚠️ API keys managed via environment variables for security.</div>
           </div>
         )}

@@ -3,6 +3,15 @@ import { db } from '@/lib/db';
 import { auth } from '@/lib/auth';
 import { marketDataService } from '@/services/market-data';
 
+interface BinanceTicker {
+  symbol: string;
+  lastPrice: string;
+  priceChangePercent: string;
+  volume: string;
+  highPrice: string;
+  lowPrice: string;
+}
+
 export async function GET() {
   try {
     const session = await auth();
@@ -18,14 +27,41 @@ export async function GET() {
       }
     });
 
-    // Hydrate with real-time price from Redis
+    // Fetch 24h ticker data from Binance for all symbols in one batch
+    const symbols = assets.map(a => a.symbol);
+    const tickerMap = new Map<string, BinanceTicker>();
+
+    try {
+      const tickerUrl = `https://api.binance.com/api/v3/ticker/24hr?symbols=${JSON.stringify(symbols)}`;
+      const tickerRes = await fetch(tickerUrl, { next: { revalidate: 30 } });
+      if (tickerRes.ok) {
+        const tickers: BinanceTicker[] = await tickerRes.json();
+        for (const t of tickers) {
+          tickerMap.set(t.symbol, t);
+        }
+      }
+    } catch (err) {
+      console.warn('[API] Failed to fetch Binance tickers:', err);
+    }
+
+    // Hydrate with real-time price and 24h data
     const populated = await Promise.all(assets.map(async (asset) => {
-      const price = await marketDataService.getLatestPrice(asset.symbol);
+      const ticker = tickerMap.get(asset.symbol);
+      const redisPrice = await marketDataService.getLatestPrice(asset.symbol);
+      const currentPrice = redisPrice || (ticker ? parseFloat(ticker.lastPrice) : 0);
+
+      const rawVolume = ticker ? parseFloat(ticker.volume) : 0;
+      let volumeStr = '0';
+      if (rawVolume >= 1e9) volumeStr = `${(rawVolume / 1e9).toFixed(1)}B`;
+      else if (rawVolume >= 1e6) volumeStr = `${(rawVolume / 1e6).toFixed(1)}M`;
+      else if (rawVolume >= 1e3) volumeStr = `${(rawVolume / 1e3).toFixed(1)}K`;
+      else volumeStr = rawVolume.toFixed(0);
+
       return {
         ...asset,
-        currentPrice: price || 0,
-        change24h: 0, // Placeholder: implement 24h change calculation in market data service
-        volume: '0', // Placeholder
+        currentPrice,
+        change24h: ticker ? parseFloat(parseFloat(ticker.priceChangePercent).toFixed(2)) : 0,
+        volume: volumeStr,
         signalsCount: asset._count.signals,
       };
     }));
