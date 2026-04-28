@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { db } from '@/lib/db';
+import { db } from '@/lib/firebase-admin';
 import { auth } from '@/lib/auth';
 import { Decimal } from 'decimal.js';
 
@@ -13,39 +13,39 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const status = searchParams.get('status');
 
-    const where: any = {};
+    let query: FirebaseFirestore.Query = db.collection('paperOrders');
     if (status && status !== 'ALL') {
-      where.status = status;
+      query = query.where('status', '==', status);
     }
 
-    const orders = await db.paperOrder.findMany({
-      where,
-      include: {
-        signal: {
-          include: {
-            asset: true,
-            riskAssessment: true,
-          },
-        },
-      },
-      orderBy: { openedAt: 'desc' },
-      take: 50,
-    });
+    const snapshot = await query.orderBy('openedAt', 'desc').limit(50).get();
 
-    const formatted = orders.map(order => ({
-      id: order.id,
-      signalId: order.signalId,
-      symbol: order.signal.asset.symbol,
-      side: order.side,
-      entryPrice: new Decimal(order.entryPrice).toNumber(),
-      exitPrice: order.exitPrice ? new Decimal(order.exitPrice).toNumber() : null,
-      stopLoss: new Decimal(order.stopLoss).toNumber(),
-      quantity: new Decimal(order.quantity).toNumber(),
-      status: order.status,
-      pnl: order.pnl ? new Decimal(order.pnl).toNumber() : null,
-      openedAt: order.openedAt,
-      closedAt: order.closedAt,
-      riskVerdict: order.signal.riskAssessment?.verdict || null,
+    const formatted = await Promise.all(snapshot.docs.map(async (doc) => {
+      const order = doc.data() as any;
+      
+      let riskVerdict = null;
+      if (order.signalId) {
+         const riskSnapshot = await db.collection('riskAssessments').where('signalId', '==', order.signalId).limit(1).get();
+         if (!riskSnapshot.empty) {
+           riskVerdict = riskSnapshot.docs[0].data().verdict;
+         }
+      }
+
+      return {
+        id: doc.id,
+        signalId: order.signalId,
+        symbol: order.symbol,
+        side: order.side,
+        entryPrice: new Decimal(order.entryPrice).toNumber(),
+        exitPrice: order.exitPrice ? new Decimal(order.exitPrice).toNumber() : null,
+        stopLoss: new Decimal(order.stopLoss).toNumber(),
+        quantity: new Decimal(order.quantity).toNumber(),
+        status: order.status,
+        pnl: order.pnl ? new Decimal(order.pnl).toNumber() : null,
+        openedAt: order.openedAt ? (order.openedAt.toDate ? order.openedAt.toDate() : new Date(order.openedAt)) : null,
+        closedAt: order.closedAt ? (order.closedAt.toDate ? order.closedAt.toDate() : new Date(order.closedAt)) : null,
+        riskVerdict,
+      };
     }));
 
     // Calculate aggregate stats

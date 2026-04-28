@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { db } from '@/lib/db';
+import { db } from '@/lib/firebase-admin';
 import { auth } from '@/lib/auth';
 import { marketDataService } from '@/services/market-data';
 
@@ -19,13 +19,8 @@ export async function GET() {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const assets = await db.asset.findMany({
-      include: {
-        _count: {
-          select: { signals: true }
-        }
-      }
-    });
+    const assetsSnapshot = await db.collection('assets').get();
+    const assets = assetsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
 
     // Fetch 24h ticker data from Binance for all symbols in one batch
     const symbols = assets.map(a => a.symbol);
@@ -62,7 +57,7 @@ export async function GET() {
         currentPrice,
         change24h: ticker ? parseFloat(parseFloat(ticker.priceChangePercent).toFixed(2)) : 0,
         volume: volumeStr,
-        signalsCount: asset._count.signals,
+        signalsCount: asset.signalsCount || 0,
       };
     }));
 

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { db } from '@/lib/db';
+import { db } from '@/lib/firebase-admin';
 import { auth } from '@/lib/auth';
 import { checkRateLimit, rateLimitHeaders } from '@/lib/rate-limit';
 import { z } from 'zod';
@@ -159,26 +159,33 @@ export async function POST(request: Request) {
     const expectancy = totalTrades > 0 ? totalPnL / totalTrades : 0;
 
     // Save backtest run to DB
-    const run = await db.backtestRun.create({
-      data: {
-        assetId: (await db.asset.findUnique({ where: { symbol: asset } }))?.id || asset,
-        timeframe,
-        startDate: new Date(startDate),
-        endDate: new Date(endDate),
-        modelConfig: { strategy: 'EMA_CROSSOVER_RSI', ema: [20, 50], rsi: 14 },
-        results: {
-          winRate: Math.round(winRate * 10) / 10,
-          expectancy: Math.round(expectancy * 100) / 100,
-          maxDrawdown: Math.round(maxDrawdown * 100) / 100,
-          totalTrades,
-          wins,
-          losses,
-          totalPnL: Math.round(totalPnL * 100) / 100,
-          finalEquity: Math.round(equity * 100) / 100,
-        },
-        trades,
+    const assetSnapshot = await db.collection('assets').where('symbol', '==', asset).limit(1).get();
+    const assetId = assetSnapshot.empty ? asset : assetSnapshot.docs[0].id;
+
+    const runRef = db.collection('backtestRuns').doc();
+    const runData = {
+      assetId,
+      timeframe,
+      startDate: new Date(startDate),
+      endDate: new Date(endDate),
+      modelConfig: { strategy: 'EMA_CROSSOVER_RSI', ema: [20, 50], rsi: 14 },
+      results: {
+        winRate: Math.round(winRate * 10) / 10,
+        expectancy: Math.round(expectancy * 100) / 100,
+        maxDrawdown: Math.round(maxDrawdown * 100) / 100,
+        totalTrades,
+        wins,
+        losses,
+        totalPnL: Math.round(totalPnL * 100) / 100,
+        finalEquity: Math.round(equity * 100) / 100,
       },
-    });
+      trades,
+      createdAt: new Date(),
+    };
+    
+    await runRef.set(runData);
+
+    const run = { id: runRef.id, ...runData };
 
     return NextResponse.json({
       id: run.id,
@@ -201,10 +208,12 @@ export async function GET() {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const runs = await db.backtestRun.findMany({
-      orderBy: { createdAt: 'desc' },
-      take: 10,
-    });
+    const snapshot = await db.collection('backtestRuns')
+      .orderBy('createdAt', 'desc')
+      .limit(10)
+      .get();
+
+    const runs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 
     return NextResponse.json(runs);
   } catch (error) {

@@ -10,12 +10,12 @@
     "worker": "npx tsx src/worker-entry.ts"
   },
   "dependencies": {
-    "@prisma/client": "^6.19.3",
     "bcryptjs": "^3.0.3",
     "bullmq": "^5.76.2",
     "date-fns": "^4.1.0",
     "decimal.js": "^10.6.0",
     "dotenv": "^17.4.2",
+    "firebase-admin": "^13.8.0",
     "framer-motion": "^12.38.0",
     "ioredis": "^5.10.1",
     "jsonwebtoken": "^9.0.3",
@@ -24,7 +24,6 @@
     "next": "16.2.4",
     "next-auth": "^5.0.0-beta.31",
     "openai": "^6.34.0",
-    "prisma": "^6.19.3",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "swr": "^2.4.1",

@@ -1,4 +1,4 @@
-import { db } from '@/lib/db';
+import { db } from '@/lib/firebase-admin';
 import { redis } from '@/lib/redis';
 import { binanceWS, NormalizedCandle } from './binance';
 import { signalQueue } from '@/workers/queues';
@@ -42,25 +42,26 @@ export class MarketDataService {
     // In production, we'd batch these or queue them.
     
     // First, ensure the asset exists in the DB
-    const asset = await db.asset.upsert({
-      where: { symbol: candle.symbol },
-      create: { 
-        symbol: candle.symbol, 
-        name: candle.symbol.replace('USDT', ''), 
-        category: 'CRYPTO' 
-      },
-      update: {}
-    });
+    const assetRef = db.collection('assets').doc(candle.symbol);
+    const assetDoc = await assetRef.get();
+    
+    if (!assetDoc.exists) {
+      await assetRef.set({
+        symbol: candle.symbol,
+        name: candle.symbol.replace('USDT', ''),
+        category: 'CRYPTO',
+        signalsCount: 0,
+        createdAt: new Date(),
+      });
+    }
 
-    // Save the snapshot (assuming 'candles' stores an array for backwards lookups, 
-    // but for now we store the single latest candle in the array for simplicity)
-    await db.marketSnapshot.create({
-      data: {
-        assetId: asset.id,
-        timeframe: candle.timeframe,
-        candles: [candle] as any, 
-        indicators: {}, // Will be updated by Indicator Pipeline
-      }
+    // Save the snapshot
+    await db.collection('marketSnapshots').add({
+      symbol: candle.symbol,
+      timeframe: candle.timeframe,
+      candles: [candle],
+      indicators: {},
+      createdAt: new Date(),
     });
   }
 

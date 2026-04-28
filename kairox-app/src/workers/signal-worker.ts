@@ -1,6 +1,6 @@
 import { Worker, Job } from 'bullmq';
 import { createBullMQConnection } from '@/lib/redis';
-import { db } from '@/lib/db';
+import { db } from '@/lib/firebase-admin';
 import { indicatorService, FeatureBundle } from '@/services/indicators';
 import { openRouterService, openRouterConfirmationService } from '@/services/ai/openrouter-service';
 import { riskEngine, PortfolioState } from '@/services/risk-engine';
@@ -21,10 +21,20 @@ async function getPortfolioState(): Promise<PortfolioState> {
   const PAPER_BALANCE = 10000;
 
   // Count open trades
-  const openOrders = await db.paperOrder.findMany({
-    where: { status: 'OPEN' },
-    include: { signal: { include: { asset: true, riskAssessment: true } } },
-  });
+  const openOrdersSnapshot = await db.collection('paperOrders').where('status', '==', 'OPEN').get();
+  
+  const openOrders = await Promise.all(openOrdersSnapshot.docs.map(async (doc) => {
+    const order = doc.data();
+    let signal = null;
+    if (order.signalId) {
+       const sigSnap = await db.collection('signals').doc(order.signalId).get();
+       if (sigSnap.exists) {
+          const riskSnap = await db.collection('riskAssessments').where('signalId', '==', order.signalId).limit(1).get();
+          signal = { ...sigSnap.data(), riskAssessment: riskSnap.empty ? null : riskSnap.docs[0].data() } as any;
+       }
+    }
+    return { ...order, signal };
+  }));
 
   const openTrades = openOrders.length;
 
@@ -37,29 +47,36 @@ async function getPortfolioState(): Promise<PortfolioState> {
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
 
-  const closedToday = await db.paperOrder.findMany({
-    where: { closedAt: { gte: todayStart }, status: { in: ['CLOSED', 'STOPPED'] } },
-  });
+  const closedTodaySnapshot = await db.collection('paperOrders')
+    .where('status', 'in', ['CLOSED', 'STOPPED'])
+    .where('closedAt', '>=', todayStart)
+    .get();
+
+  const closedToday = closedTodaySnapshot.docs.map(d => d.data());
 
   const dailyPnL = closedToday.reduce((sum, o) => sum + (o.pnl ? new Decimal(o.pnl).toNumber() : 0), 0);
   const dailyPnLPercent = PAPER_BALANCE > 0 ? (dailyPnL / PAPER_BALANCE) * 100 : 0;
 
   // Correlated assets
-  const correlatedAssets = openOrders.map(o => o.signal.asset.symbol);
+  const correlatedAssets = openOrders.map(o => o.signal?.symbol).filter(Boolean);
 
   // Consecutive stop-outs
-  const recentOrders = await db.paperOrder.findMany({
-    where: { status: { in: ['CLOSED', 'STOPPED'] } },
-    orderBy: { closedAt: 'desc' },
-    take: 10,
-  });
+  const recentOrdersSnapshot = await db.collection('paperOrders')
+    .where('status', 'in', ['CLOSED', 'STOPPED'])
+    .orderBy('closedAt', 'desc')
+    .limit(10)
+    .get();
+
+  const recentOrders = recentOrdersSnapshot.docs.map(d => d.data());
 
   let consecutiveStopOuts = 0;
   let lastStopOutTime: Date | undefined;
   for (const order of recentOrders) {
     if (order.status === 'STOPPED') {
       consecutiveStopOuts++;
-      if (!lastStopOutTime && order.closedAt) lastStopOutTime = order.closedAt;
+      if (!lastStopOutTime && order.closedAt) {
+        lastStopOutTime = order.closedAt.toDate ? order.closedAt.toDate() : new Date(order.closedAt);
+      }
     } else {
       break;
     }
@@ -127,65 +144,74 @@ export const signalWorker = new Worker(
       }
 
       // 6. Persist Signal to DB
-      const asset = await db.asset.findUnique({ where: { symbol: candle.symbol } });
-      if (!asset) throw new Error('Asset not found');
+      const assetSnapshot = await db.collection('assets').where('symbol', '==', candle.symbol).limit(1).get();
+      if (assetSnapshot.empty) throw new Error('Asset not found');
 
       const signalStatus = riskAssessment.verdict === 'APPROVED' || riskAssessment.verdict === 'REDUCED'
         ? 'APPROVED'
         : 'BLOCKED';
 
-      const signalRecord = await db.signal.create({
-        data: {
-          assetId: asset.id,
-          timeframe: candle.timeframe,
-          side: primarySignal.side,
-          confidence: primarySignal.confidence,
-          entry: primarySignal.entry,
-          stopLoss: primarySignal.stopLoss,
-          targets: primarySignal.targets,
-          reasoning: primarySignal.reasoning,
-          status: signalStatus,
-          riskAssessment: {
-            create: {
-              positionSize: riskAssessment.positionSize,
-              riskPercent: riskAssessment.riskPercent,
-              rewardToRisk: riskAssessment.rewardToRisk,
-              exposureCheck: riskAssessment.exposureCheck,
-              correlationFlag: riskAssessment.correlationFlag,
-              verdict: riskAssessment.verdict,
-              reasons: riskAssessment.reasons,
-            }
-          },
-          votes: {
-            createMany: {
-              data: [
-                {
-                  modelId: process.env.PRIMARY_MODEL || 'anthropic/claude-sonnet-4',
-                  apiProvider: 'OPENROUTER',
-                  role: 'PRIMARY',
-                  side: primarySignal.side,
-                  confidence: primarySignal.confidence,
-                  reasoning: primarySignal.reasoning,
-                  rawResponse: primarySignal as any,
-                  latencyMs: primaryResult.latencyMs || 0,
-                  tokenUsage: primaryResult.tokenUsage || { prompt: 0, completion: 0, total: 0 },
-                },
-                {
-                  modelId: process.env.CONFIRMATION_MODEL || 'gpt-4o',
-                  apiProvider: 'OPENAI',
-                  role: 'CONFIRMATION',
-                  side: confSignal.side,
-                  confidence: confSignal.confidence,
-                  reasoning: confSignal.reasoning,
-                  rawResponse: confSignal as any,
-                  latencyMs: confirmationResult.latencyMs || 0,
-                  tokenUsage: confirmationResult.tokenUsage || { prompt: 0, completion: 0, total: 0 },
-                }
-              ]
-            }
-          }
-        }
+      const batch = db.batch();
+      
+      const signalRef = db.collection('signals').doc();
+      const signalData = {
+        symbol: candle.symbol,
+        timeframe: candle.timeframe,
+        side: primarySignal.side,
+        confidence: primarySignal.confidence,
+        entry: primarySignal.entry,
+        stopLoss: primarySignal.stopLoss,
+        targets: primarySignal.targets,
+        reasoning: primarySignal.reasoning,
+        status: signalStatus,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+      batch.set(signalRef, signalData);
+
+      const riskRef = db.collection('riskAssessments').doc();
+      batch.set(riskRef, {
+        signalId: signalRef.id,
+        positionSize: riskAssessment.positionSize,
+        riskPercent: riskAssessment.riskPercent,
+        rewardToRisk: riskAssessment.rewardToRisk,
+        exposureCheck: riskAssessment.exposureCheck,
+        correlationFlag: riskAssessment.correlationFlag,
+        verdict: riskAssessment.verdict,
+        reasons: riskAssessment.reasons,
       });
+
+      const primaryVoteRef = db.collection('signalVotes').doc();
+      batch.set(primaryVoteRef, {
+        signalId: signalRef.id,
+        modelId: process.env.PRIMARY_MODEL || 'anthropic/claude-sonnet-4',
+        apiProvider: 'OPENROUTER',
+        role: 'PRIMARY',
+        side: primarySignal.side,
+        confidence: primarySignal.confidence,
+        reasoning: primarySignal.reasoning,
+        rawResponse: primarySignal,
+        latencyMs: primaryResult.latencyMs || 0,
+        tokenUsage: primaryResult.tokenUsage || { prompt: 0, completion: 0, total: 0 },
+      });
+
+      const confVoteRef = db.collection('signalVotes').doc();
+      batch.set(confVoteRef, {
+        signalId: signalRef.id,
+        modelId: process.env.CONFIRMATION_MODEL || 'meta-llama/llama-3-70b-instruct',
+        apiProvider: 'OPENROUTER',
+        role: 'CONFIRMATION',
+        side: confSignal.side,
+        confidence: confSignal.confidence,
+        reasoning: confSignal.reasoning,
+        rawResponse: confSignal,
+        latencyMs: confirmationResult.latencyMs || 0,
+        tokenUsage: confirmationResult.tokenUsage || { prompt: 0, completion: 0, total: 0 },
+      });
+
+      await batch.commit();
+      
+      const signalRecord = { id: signalRef.id, ...signalData };
 
       console.log(`[Signal Worker] Signal created: ${signalRecord.id} (Verdict: ${riskAssessment.verdict})`);
 

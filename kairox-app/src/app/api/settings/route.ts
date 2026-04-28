@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { db } from '@/lib/db';
+import { db } from '@/lib/firebase-admin';
 import { auth } from '@/lib/auth';
 import { checkRateLimit, rateLimitHeaders } from '@/lib/rate-limit';
 import { z } from 'zod';
@@ -12,10 +12,15 @@ export async function GET() {
     }
 
     // Load active strategy policy
-    const policy = await db.strategyPolicy.findFirst({ where: { isActive: true } });
+    const policySnapshot = await db.collection('strategyPolicy').where('isActive', '==', true).limit(1).get();
+    let policy = null;
+    if (!policySnapshot.empty) {
+      policy = { id: policySnapshot.docs[0].id, ...policySnapshot.docs[0].data() };
+    }
 
     // Load model configs
-    const modelConfigs = await db.modelConfig.findMany({ where: { isActive: true } });
+    const modelConfigsSnapshot = await db.collection('modelConfig').where('isActive', '==', true).get();
+    const modelConfigs = modelConfigsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 
     return NextResponse.json({
       policy: policy || {
@@ -105,68 +110,49 @@ export async function PUT(request: Request) {
 
     if (type === 'policy') {
       const validated = updatePolicySchema.parse(body.data);
+      const policyData = { name: 'Default', ...validated, isActive: true };
+      
+      await db.collection('strategyPolicy').doc('Default').set(policyData, { merge: true });
 
-      const policy = await db.strategyPolicy.upsert({
-        where: { name: 'Default' },
-        create: { name: 'Default', ...validated, isActive: true },
-        update: validated,
-      });
-
-      return NextResponse.json({ message: 'Risk policy updated', policy });
+      return NextResponse.json({ message: 'Risk policy updated', policy: policyData });
     }
 
     if (type === 'models') {
       const validated = updateModelsSchema.parse(body.data);
+      const batch = db.batch();
 
       // Update model configs in DB
       if (validated.primary) {
-        await db.modelConfig.upsert({
-          where: { id: 'primary-config' },
-          create: {
-            id: 'primary-config',
-            modelId: validated.primary.modelId,
-            apiProvider: 'openrouter',
-            role: 'PRIMARY',
-            isActive: true,
-            parameters: {
-              temperature: validated.primary.temperature,
-              maxTokens: validated.primary.maxTokens,
-            },
+        const primaryRef = db.collection('modelConfig').doc('primary-config');
+        batch.set(primaryRef, {
+          id: 'primary-config',
+          modelId: validated.primary.modelId,
+          apiProvider: 'openrouter',
+          role: 'PRIMARY',
+          isActive: true,
+          parameters: {
+            temperature: validated.primary.temperature,
+            maxTokens: validated.primary.maxTokens,
           },
-          update: {
-            modelId: validated.primary.modelId,
-            parameters: {
-              temperature: validated.primary.temperature,
-              maxTokens: validated.primary.maxTokens,
-            },
-          },
-        });
+        }, { merge: true });
       }
 
       if (validated.confirmation) {
-        await db.modelConfig.upsert({
-          where: { id: 'confirmation-config' },
-          create: {
-            id: 'confirmation-config',
-            modelId: validated.confirmation.modelId,
-            apiProvider: 'openai',
-            role: 'CONFIRMATION',
-            isActive: true,
-            parameters: {
-              temperature: validated.confirmation.temperature,
-              maxTokens: validated.confirmation.maxTokens,
-            },
+        const confRef = db.collection('modelConfig').doc('confirmation-config');
+        batch.set(confRef, {
+          id: 'confirmation-config',
+          modelId: validated.confirmation.modelId,
+          apiProvider: 'openai',
+          role: 'CONFIRMATION',
+          isActive: true,
+          parameters: {
+            temperature: validated.confirmation.temperature,
+            maxTokens: validated.confirmation.maxTokens,
           },
-          update: {
-            modelId: validated.confirmation.modelId,
-            parameters: {
-              temperature: validated.confirmation.temperature,
-              maxTokens: validated.confirmation.maxTokens,
-            },
-          },
-        });
+        }, { merge: true });
       }
 
+      await batch.commit();
       return NextResponse.json({ message: 'Model configuration updated' });
     }
 

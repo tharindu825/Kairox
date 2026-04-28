@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { db } from '@/lib/db';
+import { db } from '@/lib/firebase-admin';
 import { auth } from '@/lib/auth';
 import { redis } from '@/lib/redis';
 
@@ -14,15 +14,15 @@ export async function GET(
     }
 
     const { symbol } = await params;
+    const sym = symbol.toUpperCase();
 
     // Get asset from DB
-    const asset = await db.asset.findUnique({
-      where: { symbol: symbol.toUpperCase() },
-    });
+    const assetSnapshot = await db.collection('assets').where('symbol', '==', sym).limit(1).get();
 
-    if (!asset) {
+    if (assetSnapshot.empty) {
       return NextResponse.json({ error: 'Asset not found' }, { status: 404 });
     }
+    const asset = { id: assetSnapshot.docs[0].id, ...assetSnapshot.docs[0].data() };
 
     // Fetch historical candles from Binance REST API
     const interval = '1h';
@@ -44,24 +44,43 @@ export async function GET(
     const currentPrice = priceStr ? parseFloat(priceStr) : (candles.length > 0 ? candles[candles.length - 1].close : 0);
 
     // Get recent signals for this asset
-    const signals = await db.signal.findMany({
-      where: { assetId: asset.id },
-      include: {
-        riskAssessment: true,
-        votes: true,
-      },
-      orderBy: { createdAt: 'desc' },
-      take: 20,
-    });
+    const signalsSnapshot = await db.collection('signals')
+      .where('symbol', '==', sym)
+      .orderBy('createdAt', 'desc')
+      .limit(20)
+      .get();
+      
+    const signals = await Promise.all(signalsSnapshot.docs.map(async (doc) => {
+      const signalData = doc.data();
+      const signalId = doc.id;
+      
+      const riskSnapshot = await db.collection('riskAssessments').where('signalId', '==', signalId).limit(1).get();
+      const votesSnapshot = await db.collection('signalVotes').where('signalId', '==', signalId).get();
+      
+      return {
+        id: signalId,
+        ...signalData,
+        riskAssessment: riskSnapshot.empty ? null : { id: riskSnapshot.docs[0].id, ...riskSnapshot.docs[0].data() },
+        votes: votesSnapshot.docs.map(v => ({ id: v.id, ...v.data() }))
+      };
+    }));
 
     // Get open paper trades for this asset
-    const openTrades = await db.paperOrder.findMany({
-      where: {
-        status: 'OPEN',
-        signal: { assetId: asset.id },
-      },
-      include: { signal: true },
-    });
+    const openTradesSnapshot = await db.collection('paperOrders')
+      .where('symbol', '==', sym)
+      .where('status', '==', 'OPEN')
+      .get();
+      
+    const openTrades = await Promise.all(openTradesSnapshot.docs.map(async (doc) => {
+      const tradeData = doc.data();
+      // fetch signal
+      let signal = null;
+      if (tradeData.signalId) {
+        const sigDoc = await db.collection('signals').doc(tradeData.signalId).get();
+        if (sigDoc.exists) signal = { id: sigDoc.id, ...sigDoc.data() };
+      }
+      return { id: doc.id, ...tradeData, signal };
+    }));
 
     return NextResponse.json({
       asset,

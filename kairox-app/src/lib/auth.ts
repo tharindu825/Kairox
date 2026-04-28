@@ -1,7 +1,7 @@
 import NextAuth from 'next-auth';
 import Credentials from 'next-auth/providers/credentials';
 import bcrypt from 'bcryptjs';
-import { db } from '@/lib/db';
+import { db } from '@/lib/firebase-admin';
 import { authConfig } from './auth.config';
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
@@ -18,11 +18,17 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           return null;
         }
 
-        const user = await db.user.findUnique({
-          where: { email: credentials.email as string },
-        });
+        const usersRef = db.collection('users');
+        const snapshot = await usersRef.where('email', '==', credentials.email).limit(1).get();
 
-        if (!user || !user.passwordHash) {
+        if (snapshot.empty) {
+          return null;
+        }
+
+        const userDoc = snapshot.docs[0];
+        const user = { id: userDoc.id, ...userDoc.data() } as any;
+
+        if (!user.passwordHash) {
           return null;
         }
 

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import bcrypt from 'bcryptjs';
-import { db } from '@/lib/db';
+import { db } from '@/lib/firebase-admin';
 import { z } from 'zod';
 
 const registerSchema = z.object({
@@ -14,11 +14,10 @@ export async function POST(request: Request) {
     const body = await request.json();
     const { email, password, name } = registerSchema.parse(body);
 
-    const existingUser = await db.user.findUnique({
-      where: { email },
-    });
+    const usersRef = db.collection('users');
+    const existingSnapshot = await usersRef.where('email', '==', email).limit(1).get();
 
-    if (existingUser) {
+    if (!existingSnapshot.empty) {
       return NextResponse.json(
         { error: 'Email already registered' },
         { status: 400 }
@@ -28,27 +27,29 @@ export async function POST(request: Request) {
     const passwordHash = await bcrypt.hash(password, 12);
 
     // First user gets ADMIN role
-    const userCount = await db.user.count();
+    const allUsersSnapshot = await usersRef.count().get();
+    const userCount = allUsersSnapshot.data().count;
     const role = userCount === 0 ? 'ADMIN' : 'VIEWER';
 
-    const user = await db.user.create({
-      data: {
-        email,
-        passwordHash,
-        name: name || email.split('@')[0],
-        role,
-      },
+    const newUserRef = usersRef.doc();
+    const newUserId = newUserRef.id;
+
+    await newUserRef.set({
+      email,
+      passwordHash,
+      name: name || email.split('@')[0],
+      role,
+      createdAt: new Date(),
     });
 
     // Audit log
-    await db.auditLog.create({
-      data: {
-        userId: user.id,
-        action: 'REGISTER',
-        entity: 'User',
-        entityId: user.id,
-        details: { role },
-      },
+    await db.collection('auditLogs').add({
+      userId: newUserId,
+      action: 'REGISTER',
+      entity: 'User',
+      entityId: newUserId,
+      details: { role },
+      createdAt: new Date(),
     });
 
     return NextResponse.json(

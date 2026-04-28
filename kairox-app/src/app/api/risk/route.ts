@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { db } from '@/lib/db';
+import { db } from '@/lib/firebase-admin';
 import { auth } from '@/lib/auth';
 import { Decimal } from 'decimal.js';
 
@@ -11,28 +11,40 @@ export async function GET() {
     }
 
     // ─── Real Portfolio Metrics from DB ─────────────────────────────────
-    const openOrders = await db.paperOrder.findMany({
-      where: { status: 'OPEN' },
-      include: { signal: { include: { asset: true, riskAssessment: true } } },
-    });
+    const openOrdersSnapshot = await db.collection('paperOrders').where('status', '==', 'OPEN').get();
+    
+    const openOrders = await Promise.all(openOrdersSnapshot.docs.map(async (doc) => {
+      const order = doc.data() as any;
+      let signal = null;
+      if (order.signalId) {
+        const sigDoc = await db.collection('signals').doc(order.signalId).get();
+        if (sigDoc.exists) {
+          const sigData = sigDoc.data() as any;
+          const riskSnap = await db.collection('riskAssessments').where('signalId', '==', order.signalId).limit(1).get();
+          const riskAssessment = riskSnap.empty ? null : riskSnap.docs[0].data();
+          signal = { id: sigDoc.id, ...sigData, asset: { symbol: sigData.symbol }, riskAssessment };
+        }
+      }
+      return { id: doc.id, ...order, signal };
+    }));
 
     const openTrades = openOrders.length;
 
     // Calculate total capital at risk from open positions
     const totalRiskPercent = openOrders.reduce((sum, order) => {
-      return sum + (order.signal.riskAssessment?.riskPercent || 0);
+      return sum + (order.signal?.riskAssessment?.riskPercent || 0);
     }, 0);
 
     // Calculate daily P&L from orders closed today
     const todayStart = new Date();
     todayStart.setHours(0, 0, 0, 0);
 
-    const closedToday = await db.paperOrder.findMany({
-      where: {
-        closedAt: { gte: todayStart },
-        status: { in: ['CLOSED', 'STOPPED'] },
-      },
-    });
+    const closedTodaySnapshot = await db.collection('paperOrders')
+      .where('status', 'in', ['CLOSED', 'STOPPED'])
+      .where('closedAt', '>=', todayStart)
+      .get();
+
+    const closedToday = closedTodaySnapshot.docs.map(d => d.data());
 
     const dailyPnL = closedToday.reduce((sum, order) => {
       return sum + (order.pnl ? new Decimal(order.pnl).toNumber() : 0);
@@ -43,20 +55,22 @@ export async function GET() {
     const dailyDrawdown = paperBalance > 0 ? (dailyPnL / paperBalance) * 100 : 0;
 
     // Count correlated open pairs
-    const openSymbols = [...new Set(openOrders.map(o => o.signal.asset.symbol))];
+    const openSymbols = [...new Set(openOrders.map(o => o.signal?.asset?.symbol).filter(Boolean))];
     const cryptoCorrelationGroups = [['BTCUSDT', 'ETHUSDT']];
     let correlatedPairs = 0;
     for (const group of cryptoCorrelationGroups) {
-      const count = openSymbols.filter(s => group.includes(s)).length;
+      const count = openSymbols.filter(s => group.includes(s as string)).length;
       if (count > 1) correlatedPairs += count;
     }
 
     // Count consecutive stop-outs
-    const recentOrders = await db.paperOrder.findMany({
-      where: { status: { in: ['CLOSED', 'STOPPED'] } },
-      orderBy: { closedAt: 'desc' },
-      take: 10,
-    });
+    const recentOrdersSnapshot = await db.collection('paperOrders')
+      .where('status', 'in', ['CLOSED', 'STOPPED'])
+      .orderBy('closedAt', 'desc')
+      .limit(10)
+      .get();
+      
+    const recentOrders = recentOrdersSnapshot.docs.map(d => d.data());
 
     let consecutiveStops = 0;
     for (const order of recentOrders) {
@@ -65,7 +79,9 @@ export async function GET() {
     }
 
     // Load strategy policy from DB
-    const policy = await db.strategyPolicy.findFirst({ where: { isActive: true } });
+    const policySnapshot = await db.collection('strategyPolicy').where('isActive', '==', true).limit(1).get();
+    const policy = policySnapshot.empty ? null : policySnapshot.docs[0].data();
+    
     const maxOpenTrades = policy?.maxOpenTrades || 5;
     const maxCapitalRisk = (policy?.maxRiskPercent || 2) * maxOpenTrades;
     const maxCorrelated = policy?.maxCorrelated || 3;
@@ -76,7 +92,8 @@ export async function GET() {
     const lastStopOut = recentOrders.find(o => o.status === 'STOPPED');
     let cooldownActive = false;
     if (lastStopOut && consecutiveStops >= 2 && lastStopOut.closedAt) {
-      const minutesSince = (Date.now() - lastStopOut.closedAt.getTime()) / 60000;
+      const closedAtMs = lastStopOut.closedAt.toDate ? lastStopOut.closedAt.toDate().getTime() : new Date(lastStopOut.closedAt).getTime();
+      const minutesSince = (Date.now() - closedAtMs) / 60000;
       cooldownActive = minutesSince < cooldownMinutes;
     }
 
@@ -96,22 +113,28 @@ export async function GET() {
     };
 
     // ─── Blocked Signals ────────────────────────────────────────────────
-    const blockedSignals = await db.signal.findMany({
-      where: { status: 'BLOCKED' },
-      include: { asset: true, riskAssessment: true },
-      orderBy: { createdAt: 'desc' },
-      take: 5,
-    });
+    const blockedSignalsSnapshot = await db.collection('signals')
+      .where('status', '==', 'BLOCKED')
+      .orderBy('createdAt', 'desc')
+      .limit(5)
+      .get();
+      
+    const blockedSignals = await Promise.all(blockedSignalsSnapshot.docs.map(async (doc) => {
+       const data = doc.data();
+       const riskSnap = await db.collection('riskAssessments').where('signalId', '==', doc.id).limit(1).get();
+       const riskAssessment = riskSnap.empty ? null : riskSnap.docs[0].data();
+       return { id: doc.id, ...data, asset: { symbol: data.symbol }, riskAssessment };
+    }));
 
     // ─── Open Positions for Paper Trades Table ──────────────────────────
     const openPositions = openOrders.map(order => ({
       id: order.id,
-      symbol: order.signal.asset.symbol,
+      symbol: order.signal?.asset?.symbol,
       side: order.side,
       entryPrice: new Decimal(order.entryPrice).toNumber(),
       stopLoss: new Decimal(order.stopLoss).toNumber(),
       quantity: new Decimal(order.quantity).toNumber(),
-      openedAt: order.openedAt,
+      openedAt: order.openedAt ? (order.openedAt.toDate ? order.openedAt.toDate() : order.openedAt) : null,
       signalId: order.signalId,
     }));
 
