@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { signOut } from 'next-auth/react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   LayoutDashboard,
@@ -18,6 +19,7 @@ import {
   LogOut,
   Bell,
   Wifi,
+  ChevronDown,
 } from 'lucide-react';
 
 const navItems = [
@@ -38,6 +40,7 @@ export default function DashboardLayout({
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [notifications, setNotifications] = useState<any[]>([]);
   const [showNotifs, setShowNotifs] = useState(false);
+  const [showUserMenu, setShowUserMenu] = useState(false);
   const [connected, setConnected] = useState(false);
   const pathname = usePathname();
   const eventSourceRef = useRef<EventSource | null>(null);
@@ -62,6 +65,14 @@ export default function DashboardLayout({
 
     return () => { es.close(); };
   }, []);
+
+  useEffect(() => {
+    const onWindowClick = () => setShowUserMenu(false);
+    if (showUserMenu) {
+      window.addEventListener('click', onWindowClick);
+    }
+    return () => window.removeEventListener('click', onWindowClick);
+  }, [showUserMenu]);
 
   return (
     <div className="flex h-screen overflow-hidden" style={{ background: 'var(--kx-bg-primary)' }}>
@@ -178,6 +189,14 @@ export default function DashboardLayout({
 
         {/* Bottom section */}
         <div className="p-3 shrink-0" style={{ borderTop: '1px solid var(--kx-glass-border)' }}>
+          <button
+            onClick={() => signOut({ callbackUrl: '/login' })}
+            className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm hover:bg-white/5 transition-colors mb-2 ${sidebarCollapsed ? 'justify-center' : ''}`}
+            style={{ color: 'var(--kx-text-secondary)' }}
+          >
+            <LogOut className="w-4 h-4 shrink-0" />
+            {!sidebarCollapsed && <span>Sign Out</span>}
+          </button>
           <div className={`flex items-center gap-2 px-3 py-2 text-xs ${sidebarCollapsed ? 'justify-center' : ''}`}
                style={{ color: 'var(--kx-text-muted)' }}>
             <div className="w-2 h-2 rounded-full shrink-0" style={{ background: 'var(--kx-success)' }} />
@@ -190,7 +209,7 @@ export default function DashboardLayout({
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Top bar */}
         <header
-          className="flex items-center justify-between px-4 lg:px-6 shrink-0"
+          className="relative z-30 flex items-center justify-between px-4 lg:px-6 shrink-0"
           style={{
             height: 'var(--kx-topbar-height)',
             background: 'var(--kx-bg-secondary)',
@@ -257,9 +276,40 @@ export default function DashboardLayout({
               </AnimatePresence>
             </div>
 
-            <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold"
-                 style={{ background: 'linear-gradient(135deg, #3b82f6, #00d4aa)', color: 'white' }}>
-              K
+            <div className="relative">
+              <button
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setShowUserMenu(!showUserMenu);
+                }}
+                className="h-8 pl-1.5 pr-2 rounded-full flex items-center gap-1 text-xs font-semibold hover:opacity-90 transition-opacity"
+                style={{ background: 'linear-gradient(135deg, #3b82f6, #00d4aa)', color: 'white' }}
+                aria-label="User menu"
+              >
+                <span className="w-6 h-6 rounded-full bg-black/15 flex items-center justify-center">K</span>
+                <ChevronDown className="w-3.5 h-3.5" />
+              </button>
+              <AnimatePresence>
+                {showUserMenu && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -8, scale: 0.98 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: -8, scale: 0.98 }}
+                    className="absolute right-0 top-full mt-2 w-44 rounded-lg z-[120] p-1 shadow-xl"
+                    style={{ background: 'var(--kx-bg-card)', border: '1px solid var(--kx-border)' }}
+                    onClick={(event) => event.stopPropagation()}
+                  >
+                    <button
+                      onClick={() => signOut({ callbackUrl: '/login' })}
+                      className="w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm hover:bg-white/5 transition-colors"
+                      style={{ color: 'var(--kx-text-secondary)' }}
+                    >
+                      <LogOut className="w-4 h-4" />
+                      <span>Sign Out</span>
+                    </button>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
           </div>
         </header>

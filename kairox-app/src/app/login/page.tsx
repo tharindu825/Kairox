@@ -8,6 +8,7 @@ import { Eye, EyeOff, TrendingUp, Shield, Zap } from 'lucide-react';
 export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
@@ -22,10 +23,14 @@ export default function LoginPage() {
 
     try {
       if (isRegister) {
+        if (password !== confirmPassword) {
+          throw new Error('Passwords do not match');
+        }
+
         const res = await fetch('/api/auth/register', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email, password, name }),
+          body: JSON.stringify({ email, password, confirmPassword, name }),
         });
 
         if (!res.ok) {
@@ -213,6 +218,24 @@ export default function LoginPage() {
               </div>
             </div>
 
+            {isRegister && (
+              <div>
+                <label className="block text-sm font-medium mb-2" style={{ color: 'var(--kx-text-secondary)' }}>
+                  Confirm Password
+                </label>
+                <input
+                  id="confirm-password-input"
+                  type={showPassword ? 'text' : 'password'}
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  placeholder="â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢"
+                  className="kx-input"
+                  required
+                  minLength={6}
+                />
+              </div>
+            )}
+
             <button
               id="submit-btn"
               type="submit"
@@ -231,7 +254,7 @@ export default function LoginPage() {
           <div className="mt-6 text-center">
             <button
               type="button"
-              onClick={() => { setIsRegister(!isRegister); setError(''); }}
+              onClick={() => { setIsRegister(!isRegister); setError(''); setConfirmPassword(''); }}
               className="text-sm hover:underline"
               style={{ color: 'var(--kx-accent)' }}
             >

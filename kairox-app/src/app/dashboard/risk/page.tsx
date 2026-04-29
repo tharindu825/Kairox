@@ -24,6 +24,18 @@ export default function RiskPage() {
   const { data, error, isLoading, mutate: mutateRisk } = useSWR('/api/risk', fetcher, { refreshInterval: 5000 });
   const { data: paperData, mutate: mutatePaper } = useSWR('/api/paper-trades', fetcher, { refreshInterval: 5000 });
   const [isKilling, setIsKilling] = useState(false);
+  const metrics = data?.metrics ?? {
+    capitalAtRisk: 0,
+    maxCapitalRisk: 1,
+    dailyPnL: 0,
+    dailyDrawdown: 0,
+    maxDrawdown: -5,
+    openTrades: 0,
+    maxOpenTrades: 1,
+    paperBalance: 10000,
+    consecutiveStops: 0,
+    cooldownActive: false,
+  };
 
   const executeKillSwitch = async () => {
     if (!window.confirm('Are you sure you want to trigger the emergency kill switch? This will close all open paper trades and block all pending signals.')) return;
@@ -67,28 +79,28 @@ export default function RiskPage() {
                 <span className="text-sm font-medium" style={{ color: 'var(--kx-text-muted)' }}>Capital at Risk</span>
                 <ShieldAlert className="w-4 h-4" style={{ color: 'var(--kx-warning)' }} />
               </div>
-              <div className="text-2xl font-bold font-mono mb-1" style={{ color: 'var(--kx-text-primary)' }}>{data?.metrics.capitalAtRisk}%</div>
+              <div className="text-2xl font-bold font-mono mb-1" style={{ color: 'var(--kx-text-primary)' }}>{metrics.capitalAtRisk}%</div>
               <div className="w-full bg-black/20 rounded-full h-1.5 mt-3">
-                <div className="h-1.5 rounded-full transition-all" style={{ width: `${Math.min(((data?.metrics.capitalAtRisk || 0) / (data?.metrics.maxCapitalRisk || 1)) * 100, 100)}%`, background: 'var(--kx-warning)' }} />
+                <div className="h-1.5 rounded-full transition-all" style={{ width: `${Math.min((metrics.capitalAtRisk / metrics.maxCapitalRisk) * 100, 100)}%`, background: 'var(--kx-warning)' }} />
               </div>
-              <div className="text-xs mt-2 text-right" style={{ color: 'var(--kx-text-muted)' }}>Max {data?.metrics.maxCapitalRisk}%</div>
+              <div className="text-xs mt-2 text-right" style={{ color: 'var(--kx-text-muted)' }}>Max {metrics.maxCapitalRisk}%</div>
             </motion.div>
 
             <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }} className="kx-card p-5">
               <div className="flex justify-between items-start mb-2">
                 <span className="text-sm font-medium" style={{ color: 'var(--kx-text-muted)' }}>Daily P&L</span>
-                <TrendingDown className="w-4 h-4" style={{ color: (data?.metrics.dailyPnL || 0) >= 0 ? 'var(--kx-long)' : 'var(--kx-short)' }} />
+                <TrendingDown className="w-4 h-4" style={{ color: metrics.dailyPnL >= 0 ? 'var(--kx-long)' : 'var(--kx-short)' }} />
               </div>
-              <div className="text-2xl font-bold font-mono mb-1" style={{ color: (data?.metrics.dailyPnL || 0) >= 0 ? 'var(--kx-long)' : 'var(--kx-short)' }}>
-                {(data?.metrics.dailyPnL || 0) >= 0 ? '+' : ''}${data?.metrics.dailyPnL || 0}
+              <div className="text-2xl font-bold font-mono mb-1" style={{ color: metrics.dailyPnL >= 0 ? 'var(--kx-long)' : 'var(--kx-short)' }}>
+                {metrics.dailyPnL >= 0 ? '+' : ''}${metrics.dailyPnL}
               </div>
               <div className="w-full bg-black/20 rounded-full h-1.5 mt-3">
                 <div className="h-1.5 rounded-full transition-all" style={{
-                  width: `${Math.min(Math.abs(data?.metrics.dailyDrawdown || 0) / (Math.abs(data?.metrics.maxDrawdown || 5)) * 100, 100)}%`,
+                  width: `${Math.min(Math.abs(metrics.dailyDrawdown) / Math.abs(metrics.maxDrawdown) * 100, 100)}%`,
                   background: 'var(--kx-short)'
                 }} />
               </div>
-              <div className="text-xs mt-2 text-right" style={{ color: 'var(--kx-text-muted)' }}>DD Limit {data?.metrics.maxDrawdown}%</div>
+              <div className="text-xs mt-2 text-right" style={{ color: 'var(--kx-text-muted)' }}>DD Limit {metrics.maxDrawdown}%</div>
             </motion.div>
 
             <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="kx-card p-5">
@@ -96,9 +108,9 @@ export default function RiskPage() {
                 <span className="text-sm font-medium" style={{ color: 'var(--kx-text-muted)' }}>Active Trades</span>
                 <Crosshair className="w-4 h-4" style={{ color: 'var(--kx-accent)' }} />
               </div>
-              <div className="text-2xl font-bold font-mono mb-1" style={{ color: 'var(--kx-text-primary)' }}>{data?.metrics.openTrades} <span className="text-sm" style={{ color: 'var(--kx-text-muted)' }}>/ {data?.metrics.maxOpenTrades}</span></div>
+              <div className="text-2xl font-bold font-mono mb-1" style={{ color: 'var(--kx-text-primary)' }}>{metrics.openTrades} <span className="text-sm" style={{ color: 'var(--kx-text-muted)' }}>/ {metrics.maxOpenTrades}</span></div>
               <div className="w-full bg-black/20 rounded-full h-1.5 mt-3">
-                <div className="h-1.5 rounded-full transition-all" style={{ width: `${((data?.metrics.openTrades || 0) / (data?.metrics.maxOpenTrades || 1)) * 100}%`, background: 'var(--kx-accent)' }} />
+                <div className="h-1.5 rounded-full transition-all" style={{ width: `${(metrics.openTrades / metrics.maxOpenTrades) * 100}%`, background: 'var(--kx-accent)' }} />
               </div>
               <div className="text-xs mt-2 text-right" style={{ color: 'var(--kx-text-muted)' }}>Capacity</div>
             </motion.div>
@@ -217,7 +229,7 @@ export default function RiskPage() {
                 <div>
                   <div className="text-sm mb-1" style={{ color: 'var(--kx-text-muted)' }}>Paper Balance</div>
                   <div className="font-mono text-lg font-bold" style={{ color: 'var(--kx-text-primary)' }}>
-                    ${(data?.metrics.paperBalance || 10000).toLocaleString()}
+                    ${metrics.paperBalance.toLocaleString()}
                   </div>
                 </div>
                 <div>
@@ -230,11 +242,11 @@ export default function RiskPage() {
                 </div>
                 <div>
                   <div className="text-sm mb-1" style={{ color: 'var(--kx-text-muted)' }}>Stop-Out Streak</div>
-                  <div className="font-mono">{data?.metrics.consecutiveStops} / 3 trades</div>
+                  <div className="font-mono">{metrics.consecutiveStops} / 3 trades</div>
                 </div>
                 <div>
                   <div className="text-sm mb-1" style={{ color: 'var(--kx-text-muted)' }}>Cooldown Status</div>
-                  {data?.metrics.cooldownActive ? (
+                  {metrics.cooldownActive ? (
                     <div className="text-sm font-medium flex items-center gap-2" style={{ color: 'var(--kx-warning)' }}>
                       <AlertTriangle className="w-4 h-4" /> Active — Trading Paused
                     </div>

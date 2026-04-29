@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/firebase-admin';
 import { auth } from '@/lib/auth';
+import { redis } from '@/lib/redis';
+import { signalQueue } from '@/workers/queues';
+import type { NormalizedCandle } from '@/services/market-data/binance';
 
 export async function GET(request: Request) {
   try {
@@ -50,6 +53,39 @@ export async function GET(request: Request) {
     return NextResponse.json(signals);
   } catch (error) {
     console.error('[API] Failed to fetch signals:', error);
+    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+  }
+}
+
+export async function POST(request: Request) {
+  try {
+    const session = await auth();
+    if (!session) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const body = await request.json().catch(() => ({}));
+    const symbol = (body?.symbol || 'BTCUSDT').toUpperCase();
+    const timeframe = body?.timeframe || '1h';
+    const key = `market:${symbol}:${timeframe}:latest`;
+
+    const candleJson = await redis.get(key);
+    if (!candleJson) {
+      return NextResponse.json(
+        { error: `No latest candle found for ${symbol} ${timeframe}. Wait for market stream to cache data.` },
+        { status: 400 }
+      );
+    }
+
+    const candle = JSON.parse(candleJson) as NormalizedCandle;
+    await signalQueue.add('generate-signal', { candle });
+
+    return NextResponse.json(
+      { message: 'Signal generation queued', symbol, timeframe },
+      { status: 202 }
+    );
+  } catch (error) {
+    console.error('[API] Failed to queue manual signal generation:', error);
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }
 }

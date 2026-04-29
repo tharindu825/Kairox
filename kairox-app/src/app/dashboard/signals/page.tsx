@@ -17,6 +17,7 @@ import {
   ThumbsUp,
   ThumbsDown,
   Loader2,
+  Zap,
 } from 'lucide-react';
 
 const fetcher = (url: string) => fetch(url).then((res) => res.json());
@@ -36,6 +37,8 @@ export default function SignalsPage() {
   const [filterStatus, setFilterStatus] = useState('ALL');
   const [filterSide, setFilterSide] = useState('ALL');
   const [searchQuery, setSearchQuery] = useState('');
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [actionMessage, setActionMessage] = useState('');
 
   // Fetch signals from API
   const { data: signals, error, isLoading, mutate } = useSWR<any[]>(
@@ -59,6 +62,29 @@ export default function SignalsPage() {
     }
   };
 
+  const triggerSignalGeneration = async () => {
+    const symbol = filterAsset === 'ALL' ? 'BTCUSDT' : filterAsset;
+    setIsGenerating(true);
+    setActionMessage('');
+    try {
+      const res = await fetch('/api/signals', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ symbol, timeframe: '1h' }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to queue signal generation');
+      }
+      setActionMessage(`Signal generation queued for ${symbol} (1h).`);
+      mutate();
+    } catch (err) {
+      setActionMessage(err instanceof Error ? err.message : 'Failed to queue signal generation');
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
   const filtered = (signals || []).filter(s => {
     if (searchQuery && !s.asset.symbol.toLowerCase().includes(searchQuery.toLowerCase())) return false;
     return true;
@@ -71,6 +97,11 @@ export default function SignalsPage() {
         <p className="text-sm mt-1" style={{ color: 'var(--kx-text-muted)' }}>
           Review, filter, and manage AI-generated trading signals
         </p>
+        {actionMessage && (
+          <p className="text-xs mt-2" style={{ color: 'var(--kx-text-muted)' }}>
+            {actionMessage}
+          </p>
+        )}
       </div>
 
       {/* Filters bar */}
@@ -114,6 +145,15 @@ export default function SignalsPage() {
           <span className="text-xs ml-auto" style={{ color: 'var(--kx-text-muted)' }}>
             {filtered.length} signal{filtered.length !== 1 ? 's' : ''}
           </span>
+          <button
+            onClick={triggerSignalGeneration}
+            disabled={isGenerating}
+            className="kx-btn kx-btn-primary px-3 py-2 text-xs font-medium flex items-center gap-1.5"
+            style={{ opacity: isGenerating ? 0.7 : 1 }}
+          >
+            {isGenerating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5" />}
+            Generate Signal
+          </button>
         </div>
       </div>
 
