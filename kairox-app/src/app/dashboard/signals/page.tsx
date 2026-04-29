@@ -18,9 +18,17 @@ import {
   ThumbsDown,
   Loader2,
   Zap,
+  RefreshCw,
 } from 'lucide-react';
 
-const fetcher = (url: string) => fetch(url).then((res) => res.json());
+const fetcher = async (url: string) => {
+  const res = await fetch(url);
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data?.error || 'Failed to load signals');
+  }
+  return data;
+};
 
 function timeAgo(date: Date | string): string {
   const d = new Date(date);
@@ -33,12 +41,15 @@ function timeAgo(date: Date | string): string {
 }
 
 export default function SignalsPage() {
+  const defaultSymbols = ['BTCUSDT', 'ETHUSDT', 'ADAUSDT', 'SOLUSDT', 'XRPUSDT', 'BNBUSDT'];
   const [filterAsset, setFilterAsset] = useState('ALL');
   const [filterStatus, setFilterStatus] = useState('ALL');
   const [filterSide, setFilterSide] = useState('ALL');
   const [searchQuery, setSearchQuery] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isSyncingAssets, setIsSyncingAssets] = useState(false);
   const [actionMessage, setActionMessage] = useState('');
+  const { data: assets } = useSWR<any[]>('/api/assets', fetcher, { refreshInterval: 30000 });
 
   // Fetch signals from API
   const { data: signals, error, isLoading, mutate } = useSWR<any[]>(
@@ -63,20 +74,32 @@ export default function SignalsPage() {
   };
 
   const triggerSignalGeneration = async () => {
-    const symbol = filterAsset === 'ALL' ? 'BTCUSDT' : filterAsset;
+    const autoSelect = filterAsset === 'ALL';
+    const symbol = autoSelect ? undefined : filterAsset;
     setIsGenerating(true);
     setActionMessage('');
     try {
       const res = await fetch('/api/signals', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ symbol, timeframe: '1h' }),
+        body: JSON.stringify({
+          symbol,
+          timeframe: '1h',
+          autoSelect,
+          sideFilter: filterSide,
+          assetQuery: searchQuery.trim(),
+        }),
       });
       const data = await res.json();
       if (!res.ok) {
         throw new Error(data.error || 'Failed to queue signal generation');
       }
-      setActionMessage(`Signal generation queued for ${symbol} (1h).`);
+      const selectedSymbol = data?.symbol || symbol || 'BTCUSDT';
+      setActionMessage(
+        autoSelect
+          ? `Auto-selected ${selectedSymbol}. Signal generation queued (${data?.timeframe || '1h'}).`
+          : `Signal generation queued for ${selectedSymbol} (${data?.timeframe || '1h'}).`
+      );
       mutate();
     } catch (err) {
       setActionMessage(err instanceof Error ? err.message : 'Failed to queue signal generation');
@@ -85,10 +108,36 @@ export default function SignalsPage() {
     }
   };
 
+  const syncAssets = async () => {
+    setIsSyncingAssets(true);
+    setActionMessage('');
+    try {
+      const res = await fetch('/api/assets', { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to sync assets');
+      }
+      setActionMessage(`Assets synced successfully (${data.count || 0} symbols).`);
+    } catch (err) {
+      setActionMessage(err instanceof Error ? err.message : 'Failed to sync assets');
+    } finally {
+      setIsSyncingAssets(false);
+    }
+  };
+
   const filtered = (signals || []).filter(s => {
-    if (searchQuery && !s.asset.symbol.toLowerCase().includes(searchQuery.toLowerCase())) return false;
+    const symbol = String(s?.asset?.symbol || s?.symbol || '').toLowerCase();
+    const query = searchQuery.toLowerCase().trim();
+    if (query && !symbol.includes(query)) return false;
     return true;
   });
+
+  const assetOptions = Array.from(
+    new Set([
+      ...defaultSymbols,
+      ...(assets || []).map((asset) => String(asset?.symbol || '').toUpperCase()).filter(Boolean),
+    ])
+  ).sort();
 
   return (
     <div className="space-y-6">
@@ -100,6 +149,11 @@ export default function SignalsPage() {
         {actionMessage && (
           <p className="text-xs mt-2" style={{ color: 'var(--kx-text-muted)' }}>
             {actionMessage}
+          </p>
+        )}
+        {error && (
+          <p className="text-xs mt-2" style={{ color: 'var(--kx-short)' }}>
+            {error.message}
           </p>
         )}
       </div>
@@ -125,7 +179,7 @@ export default function SignalsPage() {
           </div>
 
           {[
-            { label: 'Asset', value: filterAsset, setter: setFilterAsset, options: ['ALL', 'BTCUSDT', 'ETHUSDT'] },
+            { label: 'Asset', value: filterAsset, setter: setFilterAsset, options: ['ALL', ...assetOptions] },
             { label: 'Status', value: filterStatus, setter: setFilterStatus, options: ['ALL', 'PENDING', 'APPROVED', 'BLOCKED', 'EXPIRED'] },
             { label: 'Side', value: filterSide, setter: setFilterSide, options: ['ALL', 'LONG', 'SHORT', 'HOLD'] },
           ].map(filter => (
@@ -145,6 +199,15 @@ export default function SignalsPage() {
           <span className="text-xs ml-auto" style={{ color: 'var(--kx-text-muted)' }}>
             {filtered.length} signal{filtered.length !== 1 ? 's' : ''}
           </span>
+          <button
+            onClick={syncAssets}
+            disabled={isSyncingAssets}
+            className="kx-btn px-3 py-2 text-xs font-medium flex items-center gap-1.5"
+            style={{ opacity: isSyncingAssets ? 0.7 : 1 }}
+          >
+            {isSyncingAssets ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+            Sync Assets
+          </button>
           <button
             onClick={triggerSignalGeneration}
             disabled={isGenerating}

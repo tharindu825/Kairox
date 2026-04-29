@@ -38,7 +38,7 @@ const SIGNAL_JSON_SCHEMA = {
         items: { type: 'string' as const },
       },
     },
-    required: ['side', 'confidence', 'entry', 'stopLoss', 'targets', 'reasoning', 'keyFactors'],
+    required: ['side', 'confidence', 'entry', 'stopLoss', 'targets', 'invalidation', 'reasoning', 'keyFactors'],
     additionalProperties: false,
   },
 };
@@ -222,6 +222,7 @@ Generate a trading signal as a JSON object.`;
         entry: 65000,
         stopLoss: 64000,
         targets: [{ price: 67000, label: 'TP1' }],
+        invalidation: 'Mock mode: OpenRouter API key not configured',
         reasoning: `Mock signal for ${symbol} — OpenRouter API key not configured. Set OPENROUTER_API_KEY in .env to enable real AI analysis.`,
         keyFactors: ['Mock signal — API key not set'],
       },

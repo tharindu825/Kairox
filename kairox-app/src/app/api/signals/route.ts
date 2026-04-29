@@ -1,9 +1,7 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/firebase-admin';
 import { auth } from '@/lib/auth';
-import { redis } from '@/lib/redis';
-import { signalQueue } from '@/workers/queues';
-import type { NormalizedCandle } from '@/services/market-data/binance';
+import { fetchRecentCandles, selectBestSignalCandidate, type SideFilter } from '@/services/signals/auto-selector';
 
 export async function GET(request: Request) {
   try {
@@ -17,15 +15,16 @@ export async function GET(request: Request) {
     const status = searchParams.get('status');
     const side = searchParams.get('side');
 
-    let query: FirebaseFirestore.Query = db.collection('signals');
-    
-    if (assetParam && assetParam !== 'ALL') query = query.where('symbol', '==', assetParam);
-    if (status && status !== 'ALL') query = query.where('status', '==', status);
-    if (side && side !== 'ALL') query = query.where('side', '==', side);
+    const baseSnapshot = await db.collection('signals').orderBy('createdAt', 'desc').limit(300).get();
+    const filteredDocs = baseSnapshot.docs.filter((doc) => {
+      const data = doc.data();
+      if (assetParam && assetParam !== 'ALL' && data.symbol !== assetParam) return false;
+      if (status && status !== 'ALL' && data.status !== status) return false;
+      if (side && side !== 'ALL' && data.side !== side) return false;
+      return true;
+    }).slice(0, 50);
 
-    const snapshot = await query.orderBy('createdAt', 'desc').limit(50).get();
-
-    const signals = await Promise.all(snapshot.docs.map(async (doc) => {
+    const signals = await Promise.all(filteredDocs.map(async (doc) => {
       const data = doc.data();
       const signalId = doc.id;
 
@@ -65,23 +64,50 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json().catch(() => ({}));
-    const symbol = (body?.symbol || 'BTCUSDT').toUpperCase();
+    const requestedSymbol = body?.symbol ? String(body.symbol).toUpperCase() : null;
     const timeframe = body?.timeframe || '1h';
-    const key = `market:${symbol}:${timeframe}:latest`;
+    const sideFilter = body?.sideFilter ? String(body.sideFilter).toUpperCase() as SideFilter : 'ALL';
+    const assetQuery = body?.assetQuery ? String(body.assetQuery).toUpperCase() : '';
+    const { redis } = await import('@/lib/redis');
+    const { signalQueue } = await import('@/workers/queues');
+    const autoSelect = body?.autoSelect === true || !requestedSymbol;
 
-    const candleJson = await redis.get(key);
-    if (!candleJson) {
-      return NextResponse.json(
-        { error: `No latest candle found for ${symbol} ${timeframe}. Wait for market stream to cache data.` },
-        { status: 400 }
-      );
+    let symbol = requestedSymbol || 'BTCUSDT';
+    let candle: any = null;
+
+    if (autoSelect) {
+      const best = await selectBestSignalCandidate({
+        timeframe,
+        sideFilter,
+        assetQuery,
+      });
+
+      if (!best) {
+        return NextResponse.json(
+          { error: 'No pair passed the current filters and indicator requirements.' },
+          { status: 400 }
+        );
+      }
+
+      symbol = best.symbol;
+      candle = best.candle;
+      await redis.set(`market:${symbol}:${timeframe}:latest`, JSON.stringify(candle));
+    } else {
+      const candles = await fetchRecentCandles(symbol, timeframe, 220);
+      if (!candles || candles.length === 0) {
+        return NextResponse.json(
+          { error: `No candle data available for ${symbol} ${timeframe}.` },
+          { status: 400 }
+        );
+      }
+      candle = candles[candles.length - 1];
+      await redis.set(`market:${symbol}:${timeframe}:latest`, JSON.stringify(candle));
     }
 
-    const candle = JSON.parse(candleJson) as NormalizedCandle;
     await signalQueue.add('generate-signal', { candle });
 
     return NextResponse.json(
-      { message: 'Signal generation queued', symbol, timeframe },
+      { message: 'Signal generation queued', symbol, timeframe, autoSelected: autoSelect },
       { status: 202 }
     );
   } catch (error) {

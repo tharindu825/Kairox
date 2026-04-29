@@ -2,21 +2,23 @@ import 'dotenv/config';
 import { marketDataService } from '@/services/market-data';
 import { signalWorker } from '@/workers/signal-worker';
 import { alertWorker } from '@/workers/alert-worker';
+import { startAutoSignalGeneration } from '@/services/signals/auto-generator';
 
-console.log('🚀 Starting Kairox Background Workers...');
+console.log('Starting Kairox background workers...');
 
-// Start BullMQ workers (they auto-connect on instantiation)
 console.log(`[Workers] Signal Worker initialized (Queue: ${signalWorker.name})`);
 console.log(`[Workers] Alert Worker initialized (Queue: ${alertWorker.name})`);
 
-// Start Market Data Stream
-console.log('🚀 Starting Market Data WebSocket Stream...');
+console.log('Starting market data websocket stream...');
 marketDataService.startStream();
 
-// Handle graceful shutdown
+const stopAutoSignalGeneration = startAutoSignalGeneration();
+
 process.on('SIGINT', async () => {
   console.log('\nGracefully shutting down...');
+  stopAutoSignalGeneration();
   await signalWorker.close();
   await alertWorker.close();
   process.exit(0);
 });
+

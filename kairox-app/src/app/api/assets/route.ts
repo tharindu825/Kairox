@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { db } from '@/lib/firebase-admin';
 import { auth } from '@/lib/auth';
 import { marketDataService } from '@/services/market-data';
+import { redis } from '@/lib/redis';
 
 interface BinanceTicker {
   symbol: string;
@@ -20,7 +21,22 @@ export async function GET() {
     }
 
     const assetsSnapshot = await db.collection('assets').get();
-    const assets = assetsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
+    let assets = assetsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
+
+    if (assets.length === 0) {
+      const redisSymbols = await redis.hkeys('market:ticker').catch(() => []);
+      const fallbackSymbols = redisSymbols.length > 0
+        ? redisSymbols
+        : ['BTCUSDT', 'ETHUSDT', 'ADAUSDT', 'SOLUSDT', 'XRPUSDT', 'BNBUSDT'];
+
+      assets = fallbackSymbols.map((symbol) => ({
+        id: symbol,
+        symbol,
+        name: symbol.replace('USDT', ''),
+        category: 'CRYPTO',
+        signalsCount: 0,
+      }));
+    }
 
     // Fetch 24h ticker data from Binance for all symbols in one batch
     const symbols = assets.map(a => a.symbol);
@@ -64,6 +80,41 @@ export async function GET() {
     return NextResponse.json(populated);
   } catch (error) {
     console.error('[API] Failed to fetch assets:', error);
+    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+  }
+}
+
+export async function POST() {
+  try {
+    const session = await auth();
+    if (!session) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const seedSymbols = ['BTCUSDT', 'ETHUSDT', 'ADAUSDT', 'SOLUSDT', 'XRPUSDT', 'BNBUSDT'];
+    const batch = db.batch();
+
+    for (const symbol of seedSymbols) {
+      const ref = db.collection('assets').doc(symbol);
+      batch.set(
+        ref,
+        {
+          symbol,
+          name: symbol.replace('USDT', ''),
+          category: 'CRYPTO',
+          signalsCount: 0,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+        { merge: true }
+      );
+    }
+
+    await batch.commit();
+
+    return NextResponse.json({ message: 'Assets synced', count: seedSymbols.length }, { status: 200 });
+  } catch (error) {
+    console.error('[API] Failed to sync assets:', error);
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }
 }

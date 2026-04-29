@@ -27,6 +27,13 @@ const envSchema = z.object({
   BINANCE_WS_URL: z.string().default('wss://stream.binance.com:9443'),
   BINANCE_REST_URL: z.string().default('https://api.binance.com'),
 
+  // Auto signal generation
+  AUTO_SIGNAL_ENABLED: z.enum(['true', 'false']).optional(),
+  AUTO_SIGNAL_INTERVAL_SECONDS: z.string().optional(),
+  AUTO_SIGNAL_TIMEFRAME: z.string().optional(),
+  AUTO_SIGNAL_SIDE_FILTER: z.enum(['ALL', 'LONG', 'SHORT']).optional(),
+  AUTO_SIGNAL_ASSET_QUERY: z.string().optional(),
+
   // Telegram
   TELEGRAM_BOT_TOKEN: z.string().optional(),
   TELEGRAM_CHAT_ID: z.string().optional(),
