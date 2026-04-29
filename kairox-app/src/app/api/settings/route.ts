@@ -45,12 +45,12 @@ export async function GET() {
         },
         {
           id: 'default-confirmation',
-          modelId: process.env.CONFIRMATION_MODEL || 'meta-llama/llama-3-70b-instruct',
-          apiProvider: 'openrouter',
+          modelId: process.env.CONFIRMATION_MODEL || 'gpt-4o',
+          apiProvider: 'openai',
           role: 'CONFIRMATION',
           isActive: true,
           parameters: { temperature: 0.3, maxTokens: 2000 },
-          fallback: process.env.CONFIRMATION_FALLBACK_MODEL || 'anthropic/claude-3-haiku',
+          fallback: process.env.CONFIRMATION_FALLBACK_MODEL || 'gpt-4o-mini',
         },
       ],
       alerts: {

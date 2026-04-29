@@ -2,7 +2,8 @@ import { Worker, Job } from 'bullmq';
 import { createBullMQConnection } from '@/lib/redis';
 import { db } from '@/lib/firebase-admin';
 import { indicatorService, FeatureBundle } from '@/services/indicators';
-import { openRouterService, openRouterConfirmationService } from '@/services/ai/openrouter-service';
+import { openRouterService } from '@/services/ai/openrouter-service';
+import { openAIService } from '@/services/ai/openai-service';
 import { riskEngine, PortfolioState } from '@/services/risk-engine';
 import { paperTradingService } from '@/services/paper-trading';
 import { alertQueue } from './queues';
@@ -114,7 +115,7 @@ export const signalWorker = new Worker(
       console.log(`[Signal Worker] Requesting AI analysis for ${candle.symbol}...`);
       const [primaryResult, confirmationResult] = await Promise.all([
         openRouterService.generateCompletion(candle.symbol, candle.timeframe, features),
-        openRouterConfirmationService.generateCompletion(candle.symbol, candle.timeframe, features),
+        openAIService.generateCompletion(candle.symbol, candle.timeframe, features),
       ]);
 
       if (!primaryResult.success || !primaryResult.data) {
@@ -198,8 +199,8 @@ export const signalWorker = new Worker(
       const confVoteRef = db.collection('signalVotes').doc();
       batch.set(confVoteRef, {
         signalId: signalRef.id,
-        modelId: process.env.CONFIRMATION_MODEL || 'meta-llama/llama-3-70b-instruct',
-        apiProvider: 'OPENROUTER',
+        modelId: process.env.CONFIRMATION_MODEL || 'gpt-4o',
+        apiProvider: 'OPENAI',
         role: 'CONFIRMATION',
         side: confSignal.side,
         confidence: confSignal.confidence,
