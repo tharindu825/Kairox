@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import { marketDataService } from '@/services/market-data';
 import { signalWorker } from '@/workers/signal-worker';
 import { alertWorker } from '@/workers/alert-worker';
