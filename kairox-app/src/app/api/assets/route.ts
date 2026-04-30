@@ -21,8 +21,8 @@ export async function GET() {
     }
 
     const db = await getDb();
-    const assets = await db.collection('assets').find({}).toArray();
-    const formattedAssets = assets.map(doc => ({ id: doc._id.toString(), ...doc } as any));
+    const rawAssets = await db.collection('assets').find({}).toArray();
+    let assets = rawAssets.map(doc => ({ id: doc._id.toString(), ...doc } as any));
 
     if (assets.length === 0) {
       const redisSymbols = await redis.hkeys('market:ticker').catch(() => []);
