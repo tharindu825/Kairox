@@ -53,6 +53,6 @@ export const alertWorker = new Worker(
   { connection: createBullMQConnection() }
 );
 
-alertWorker.on('failed', (job, err) => {
+alertWorker.on('failed', (job: Job<AlertJobData> | undefined, err: Error) => {
   console.error(`[Alert Worker] Job ${job?.id} failed:`, err);
 });

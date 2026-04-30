@@ -3,22 +3,44 @@ import { marketDataService } from '@/services/market-data';
 import { signalWorker } from '@/workers/signal-worker';
 import { alertWorker } from '@/workers/alert-worker';
 import { startAutoSignalGeneration } from '@/services/signals/auto-generator';
+import { binanceREST } from '@/services/market-data/binance-rest';
+import { indicatorService } from '@/services/indicators';
 
-console.log('Starting Kairox background workers...');
+async function bootstrap() {
+  console.log('Starting Kairox background workers...');
 
-console.log(`[Workers] Signal Worker initialized (Queue: ${signalWorker.name})`);
-console.log(`[Workers] Alert Worker initialized (Queue: ${alertWorker.name})`);
+  // 1. Priming Indicators
+  const symbols = ['BTCUSDT', 'ETHUSDT'];
+  const timeframes = ['1h', '4h'];
 
-console.log('Starting market data websocket stream...');
-marketDataService.startStream();
+  console.log('[Bootstrap] Priming indicators with historical data...');
+  for (const symbol of symbols) {
+    for (const tf of timeframes) {
+      const klines = await binanceREST.getKlines(symbol, tf, 250);
+      indicatorService.initialize(symbol, tf, klines);
+    }
+  }
+  console.log('[Bootstrap] Indicators primed successfully.');
 
-const stopAutoSignalGeneration = startAutoSignalGeneration();
+  console.log(`[Workers] Signal Worker initialized (Queue: ${signalWorker.name})`);
+  console.log(`[Workers] Alert Worker initialized (Queue: ${alertWorker.name})`);
 
-process.on('SIGINT', async () => {
-  console.log('\nGracefully shutting down...');
-  stopAutoSignalGeneration();
-  await signalWorker.close();
-  await alertWorker.close();
-  process.exit(0);
+  console.log('Starting market data websocket stream...');
+  marketDataService.startStream();
+
+  const stopAutoSignalGeneration = startAutoSignalGeneration();
+
+  process.on('SIGINT', async () => {
+    console.log('\nGracefully shutting down...');
+    stopAutoSignalGeneration();
+    await signalWorker.close();
+    await alertWorker.close();
+    process.exit(0);
+  });
+}
+
+bootstrap().catch(err => {
+  console.error('[Bootstrap] Critical failure during startup:', err);
+  process.exit(1);
 });
 

@@ -36,7 +36,7 @@ export class MarketDataService {
   }
 
   /**
-   * Persist a closed candle into PostgreSQL MarketSnapshot structure.
+   * Persist a closed candle into Firestore MarketSnapshot structure.
    */
   private async persistCandle(candle: NormalizedCandle) {
     // In production, we'd batch these or queue them.

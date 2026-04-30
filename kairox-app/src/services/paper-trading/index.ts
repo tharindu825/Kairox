@@ -12,13 +12,14 @@ export class PaperTradingService {
     // Only process every few seconds or when a significant move happens
     // In production, you'd cache open orders in Redis to avoid querying Postgres on every tick.
     const openOrdersSnapshot = await db.collection('paperOrders')
-      .where('status', '==', 'OPEN')
       .where('symbol', '==', candle.symbol)
       .get();
       
     if (openOrdersSnapshot.empty) return;
     
-    const openOrders = await Promise.all(openOrdersSnapshot.docs.map(async (doc) => {
+    const openOrders = await Promise.all(openOrdersSnapshot.docs
+      .filter(doc => doc.data().status === 'OPEN')
+      .map(async (doc) => {
        const order = doc.data();
        let signal = null;
        if (order.signalId) {
@@ -44,7 +45,7 @@ export class PaperTradingService {
       }
 
       // 2. Check Targets
-      if (!exitReason) {
+      if (!exitReason && order.signal?.targets?.length > 0) {
         const targets = order.signal.targets as any[];
         // For simplicity, we just exit on TP1 right now
         const tp1 = new Decimal(targets[0].price);
@@ -56,6 +57,8 @@ export class PaperTradingService {
           exitReason = 'TAKE_PROFIT';
           exitPrice = currentPrice;
         }
+      } else if (!exitReason && !order.signal) {
+        console.warn(`[Paper Trade] Missing signal data for order ${order.id}. Skipping target check.`);
       }
 
       // 3. Execute Exit

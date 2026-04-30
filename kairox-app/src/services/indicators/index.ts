@@ -13,30 +13,43 @@ export interface FeatureBundle {
   trend: 'STRONG_BULL' | 'BULL' | 'NEUTRAL' | 'BEAR' | 'STRONG_BEAR';
 }
 
-export class IndicatorService {
-  private rsi: RSI;
-  private macd: MACD;
-  private ema20: EMA;
-  private ema50: EMA;
-  private ema200: EMA;
-  private atr: ATR;
-  private bb: BollingerBands;
+interface SymbolState {
+  rsi: RSI;
+  macd: MACD;
+  ema20: EMA;
+  ema50: EMA;
+  ema200: EMA;
+  atr: ATR;
+  bb: BollingerBands;
+}
 
-  constructor() {
-    this.rsi = new RSI(14);
-    this.macd = new MACD(new EMA(12) as any, new EMA(26) as any, new EMA(9) as any);
-    this.ema20 = new EMA(20);
-    this.ema50 = new EMA(50);
-    this.ema200 = new EMA(200);
-    this.atr = new ATR(14);
-    this.bb = new BollingerBands(20, 2);
+export class IndicatorService {
+  private states: Map<string, SymbolState> = new Map();
+
+  private getOrCreateState(symbol: string, timeframe: string): SymbolState {
+    const key = `${symbol.toUpperCase()}_${timeframe}`;
+    let state = this.states.get(key);
+
+    if (!state) {
+      state = {
+        rsi: new RSI(14),
+        macd: new MACD(new EMA(12) as any, new EMA(26) as any, new EMA(9) as any),
+        ema20: new EMA(20),
+        ema50: new EMA(50),
+        ema200: new EMA(200),
+        atr: new ATR(14),
+        bb: new BollingerBands(20, 2),
+      };
+      this.states.set(key, state);
+    }
+    return state;
   }
 
   /**
    * Initializes the indicators with historical candles.
-   * Required to build up the necessary data window before generating accurate signals.
    */
-  initialize(historicalCandles: NormalizedCandle[]) {
+  initialize(symbol: string, timeframe: string, historicalCandles: NormalizedCandle[]) {
+    console.log(`[Indicator Service] Initializing ${symbol} (${timeframe}) with ${historicalCandles.length} candles.`);
     for (const candle of historicalCandles) {
       this.update(candle);
     }
@@ -46,27 +59,30 @@ export class IndicatorService {
    * Updates all indicators with a new closed candle.
    */
   update(candle: NormalizedCandle) {
-    this.rsi.update(candle.close, false);
-    this.macd.update(candle.close, false);
-    this.ema20.update(candle.close, false);
-    this.ema50.update(candle.close, false);
-    this.ema200.update(candle.close, false);
+    const state = this.getOrCreateState(candle.symbol, candle.timeframe);
+    
+    state.rsi.update(candle.close, false);
+    state.macd.update(candle.close, false);
+    state.ema20.update(candle.close, false);
+    state.ema50.update(candle.close, false);
+    state.ema200.update(candle.close, false);
     
     // ATR requires High, Low, Close
-    this.atr.update({ high: candle.high, low: candle.low, close: candle.close }, false);
-    
-    this.bb.update(candle.close, false);
+    state.atr.update({ high: candle.high, low: candle.low, close: candle.close }, false);
+    state.bb.update(candle.close, false);
   }
 
   /**
    * Extracts the current indicator states into a structured bundle for the AI.
    */
   getFeatureBundle(currentCandle: NormalizedCandle): FeatureBundle {
-    const rsiVal = this.rsi.isStable ? this.rsi.getResult()?.valueOf() : 50;
+    const state = this.getOrCreateState(currentCandle.symbol, currentCandle.timeframe);
+    
+    const rsiVal = state.rsi.isStable ? state.rsi.getResult()?.valueOf() : 50;
     
     let macdVal = { macd: 0, signal: 0, histogram: 0 };
-    if (this.macd.isStable) {
-      const result = this.macd.getResult() as any;
+    if (state.macd.isStable) {
+      const result = state.macd.getResult() as any;
       if (result) {
         macdVal = {
           macd: result.macd?.valueOf() || 0,
@@ -76,15 +92,15 @@ export class IndicatorService {
       }
     }
 
-    const ema20Val = this.ema20.isStable ? this.ema20.getResult()?.valueOf() : currentCandle.close;
-    const ema50Val = this.ema50.isStable ? this.ema50.getResult()?.valueOf() : currentCandle.close;
-    const ema200Val = this.ema200.isStable ? this.ema200.getResult()?.valueOf() : currentCandle.close;
+    const ema20Val = state.ema20.isStable ? state.ema20.getResult()?.valueOf() : currentCandle.close;
+    const ema50Val = state.ema50.isStable ? state.ema50.getResult()?.valueOf() : currentCandle.close;
+    const ema200Val = state.ema200.isStable ? state.ema200.getResult()?.valueOf() : currentCandle.close;
 
-    const atrVal = this.atr.isStable ? this.atr.getResult()?.valueOf() : 0;
+    const atrVal = state.atr.isStable ? state.atr.getResult()?.valueOf() : 0;
     
     let bbVal = { lower: 0, middle: 0, upper: 0 };
-    if (this.bb.isStable) {
-      const result = this.bb.getResult() as any;
+    if (state.bb.isStable) {
+      const result = state.bb.getResult() as any;
       if (result) {
         bbVal = {
           lower: result.lower?.valueOf() || 0,
@@ -108,8 +124,6 @@ export class IndicatorService {
   }
 
   private analyzeVolume(candle: NormalizedCandle): string {
-    // In a real system, we compare against a volume moving average
-    // For now, this is a placeholder
     return 'ELEVATED';
   }
 

@@ -16,12 +16,12 @@ export const TargetSchema = z.object({
 export const AISignalResponseSchema = z.object({
   side: SignalSideEnum,
   confidence: z.number().min(0).max(1),
-  entry: z.number().positive(),
-  stopLoss: z.number().positive(),
-  targets: z.array(TargetSchema).min(1).max(5),
+  entry: z.number().nonnegative(),
+  stopLoss: z.number().nonnegative(),
+  targets: z.array(TargetSchema).max(5),
   invalidation: z.string().optional(),
   reasoning: z.string().min(10),
-  keyFactors: z.array(z.string()).min(1).max(10),
+  keyFactors: z.array(z.string()).min(0).max(10),
 });
 export type AISignalResponse = z.infer<typeof AISignalResponseSchema>;
 

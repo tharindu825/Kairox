@@ -19,7 +19,7 @@ export interface SignalJobData {
  * Build real portfolio state from the database
  */
 async function getPortfolioState(): Promise<PortfolioState> {
-  const PAPER_BALANCE = 10000;
+  const PAPER_BALANCE = Number(process.env.PAPER_BALANCE || 10000);
 
   // Count open trades
   const openOrdersSnapshot = await db.collection('paperOrders').where('status', '==', 'OPEN').get();
@@ -49,11 +49,12 @@ async function getPortfolioState(): Promise<PortfolioState> {
   todayStart.setHours(0, 0, 0, 0);
 
   const closedTodaySnapshot = await db.collection('paperOrders')
-    .where('status', 'in', ['CLOSED', 'STOPPED'])
     .where('closedAt', '>=', todayStart)
     .get();
 
-  const closedToday = closedTodaySnapshot.docs.map(d => d.data());
+  const closedToday = closedTodaySnapshot.docs
+    .map(d => d.data())
+    .filter(o => ['CLOSED', 'STOPPED'].includes(o.status));
 
   const dailyPnL = closedToday.reduce((sum, o) => sum + (o.pnl ? new Decimal(o.pnl).toNumber() : 0), 0);
   const dailyPnLPercent = PAPER_BALANCE > 0 ? (dailyPnL / PAPER_BALANCE) * 100 : 0;
@@ -63,12 +64,14 @@ async function getPortfolioState(): Promise<PortfolioState> {
 
   // Consecutive stop-outs
   const recentOrdersSnapshot = await db.collection('paperOrders')
-    .where('status', 'in', ['CLOSED', 'STOPPED'])
     .orderBy('closedAt', 'desc')
-    .limit(10)
+    .limit(20)
     .get();
 
-  const recentOrders = recentOrdersSnapshot.docs.map(d => d.data());
+  const recentOrders = recentOrdersSnapshot.docs
+    .map(d => d.data())
+    .filter(o => ['CLOSED', 'STOPPED'].includes(o.status))
+    .slice(0, 10);
 
   let consecutiveStopOuts = 0;
   let lastStopOutTime: Date | undefined;
@@ -253,6 +256,6 @@ export const signalWorker = new Worker(
   { connection: createBullMQConnection() }
 );
 
-signalWorker.on('failed', (job, err) => {
+signalWorker.on('failed', (job: Job<SignalJobData> | undefined, err: Error) => {
   console.error(`[Signal Worker] Job ${job?.id} failed:`, err);
 });
