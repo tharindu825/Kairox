@@ -19,6 +19,7 @@ import {
   Loader2,
   Zap,
   RefreshCw,
+  ScrollText,
 } from 'lucide-react';
 
 const fetcher = async (url: string) => {
@@ -30,8 +31,15 @@ const fetcher = async (url: string) => {
   return data;
 };
 
-function timeAgo(date: Date | string): string {
-  const d = new Date(date);
+function timeAgo(date: any): string {
+  if (!date) return 'Just now';
+  let d: Date;
+  if (date.toDate && typeof date.toDate === 'function') {
+    d = date.toDate();
+  } else {
+    d = new Date(date);
+  }
+  if (isNaN(d.getTime())) return 'Recently';
   const seconds = Math.floor((Date.now() - d.getTime()) / 1000);
   if (seconds < 60) return `${seconds}s ago`;
   const minutes = Math.floor(seconds / 60);
@@ -48,6 +56,7 @@ export default function SignalsPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSyncingAssets, setIsSyncingAssets] = useState(false);
+  const [isLogsOpen, setIsLogsOpen] = useState(false);
   const [actionMessage, setActionMessage] = useState('');
   const { data: assets } = useSWR<any[]>('/api/assets', fetcher, { refreshInterval: 30000 });
 
@@ -57,6 +66,25 @@ export default function SignalsPage() {
     fetcher,
     { refreshInterval: 5000 } // Poll every 5s
   );
+  
+  // Fetch system logs
+  const { data: logs } = useSWR<any[]>(
+    isLogsOpen ? '/api/logs' : null,
+    fetcher,
+    { refreshInterval: 3000 }
+  );
+
+  const deleteSignal = async (id: string) => {
+    if (!confirm('Are you sure you want to delete this signal?')) return;
+    try {
+      const res = await fetch(`/api/signals/${id}`, { method: 'DELETE' });
+      if (res.ok) {
+        mutate();
+      }
+    } catch (err) {
+      console.error('Failed to delete signal', err);
+    }
+  };
 
   const updateSignalStatus = async (id: string, newStatus: 'APPROVED' | 'BLOCKED') => {
     try {
@@ -94,11 +122,12 @@ export default function SignalsPage() {
       if (!res.ok) {
         throw new Error(data.error || 'Failed to queue signal generation');
       }
-      const selectedSymbol = data?.symbol || symbol || 'BTCUSDT';
+      
+      const symbols = data?.symbols || [data?.symbol || symbol || 'BTCUSDT'];
       setActionMessage(
         autoSelect
-          ? `Auto-selected ${selectedSymbol}. Signal generation queued (${data?.timeframe || '1h'}).`
-          : `Signal generation queued for ${selectedSymbol} (${data?.timeframe || '1h'}).`
+          ? `Scanning top 200 assets... Found and queued: ${symbols.join(', ')}.`
+          : `Signal generation queued for ${symbols[0]} (${data?.timeframe || '1h'}).`
       );
       mutate();
     } catch (err) {
@@ -151,11 +180,20 @@ export default function SignalsPage() {
             {actionMessage}
           </p>
         )}
-        {error && (
-          <p className="text-xs mt-2" style={{ color: 'var(--kx-short)' }}>
-            {error.message}
-          </p>
-        )}
+      </div>
+
+      {/* Header Actions */}
+      <div className="flex justify-between items-center">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setIsLogsOpen(true)}
+            className="kx-btn px-3 py-2 text-xs font-medium flex items-center gap-1.5"
+            style={{ background: 'rgba(59,130,246,0.08)', color: 'var(--kx-accent)' }}
+          >
+            <ScrollText className="w-3.5 h-3.5" />
+            System Logs
+          </button>
+        </div>
       </div>
 
       {/* Filters bar */}
@@ -264,13 +302,15 @@ export default function SignalsPage() {
                     </span>
                   </div>
 
-                  <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm mb-3">
-                    <span style={{ color: 'var(--kx-text-muted)' }}>Entry: <span className="font-mono font-medium" style={{ color: 'var(--kx-text-primary)' }}>${Number(signal.entry).toLocaleString()}</span></span>
-                    <span style={{ color: 'var(--kx-text-muted)' }}>Stop: <span className="font-mono font-medium" style={{ color: 'var(--kx-short)' }}>${Number(signal.stopLoss).toLocaleString()}</span></span>
-                    {signal.targets.map((t: any) => (
-                      <span key={t.label} style={{ color: 'var(--kx-text-muted)' }}>{t.label}: <span className="font-mono font-medium" style={{ color: 'var(--kx-long)' }}>${Number(t.price).toLocaleString()}</span></span>
-                    ))}
-                  </div>
+                  {signal.side !== 'HOLD' && (
+                    <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm mb-3">
+                      <span style={{ color: 'var(--kx-text-muted)' }}>Entry: <span className="font-mono font-medium" style={{ color: 'var(--kx-text-primary)' }}>${Number(signal.entry).toLocaleString()}</span></span>
+                      <span style={{ color: 'var(--kx-text-muted)' }}>Stop: <span className="font-mono font-medium" style={{ color: 'var(--kx-short)' }}>${Number(signal.stopLoss).toLocaleString()}</span></span>
+                      {signal.targets?.map((t: any) => (
+                        <span key={t.label} style={{ color: 'var(--kx-text-muted)' }}>{t.label}: <span className="font-mono font-medium" style={{ color: 'var(--kx-long)' }}>${Number(t.price).toLocaleString()}</span></span>
+                      ))}
+                    </div>
+                  )}
 
                   <p className="text-sm" style={{ color: 'var(--kx-text-secondary)' }}>{signal.reasoning}</p>
                 </div>
@@ -284,9 +324,12 @@ export default function SignalsPage() {
                         stroke={signal.side === 'LONG' ? 'var(--kx-long)' : signal.side === 'SHORT' ? 'var(--kx-short)' : 'var(--kx-hold)'}
                         strokeWidth="3" strokeDasharray={`${2 * Math.PI * 28 * signal.confidence} ${2 * Math.PI * 28}`} strokeLinecap="round" />
                     </svg>
-                    <span className="absolute inset-0 flex items-center justify-center text-sm font-bold font-mono" style={{ color: 'var(--kx-text-primary)' }}>
-                      {Math.round(signal.confidence * 100)}%
-                    </span>
+                    <div className="absolute inset-0 flex flex-col items-center justify-center">
+                      <span className="text-sm font-bold font-mono" style={{ color: 'var(--kx-text-primary)' }}>
+                        {Math.round(signal.confidence * 100)}%
+                      </span>
+                      <span className="text-[8px] uppercase tracking-tighter opacity-50 font-bold">Confidence</span>
+                    </div>
                   </div>
 
                   {/* Model votes */}
@@ -303,29 +346,81 @@ export default function SignalsPage() {
                   </div>
 
                   {/* Actions */}
-                  {signal.status === 'PENDING' && (
-                    <div className="flex gap-2">
-                      <button onClick={() => updateSignalStatus(signal.id, 'APPROVED')} className="kx-btn p-2 rounded-lg hover:scale-105" style={{ background: 'rgba(0,212,170,0.12)', color: 'var(--kx-long)' }}>
-                        <ThumbsUp className="w-4 h-4" />
-                      </button>
-                      <button onClick={() => updateSignalStatus(signal.id, 'BLOCKED')} className="kx-btn p-2 rounded-lg hover:scale-105" style={{ background: 'rgba(255,71,87,0.12)', color: 'var(--kx-short)' }}>
-                        <ThumbsDown className="w-4 h-4" />
-                      </button>
-                    </div>
-                  )}
+                  <div className="flex gap-2">
+                    {signal.status === 'PENDING' && (
+                      <>
+                        <button onClick={() => updateSignalStatus(signal.id, 'APPROVED')} className="kx-btn p-2 rounded-lg hover:scale-105" style={{ background: 'rgba(0,212,170,0.12)', color: 'var(--kx-long)' }}>
+                          <ThumbsUp className="w-4 h-4" />
+                        </button>
+                        <button onClick={() => updateSignalStatus(signal.id, 'BLOCKED')} className="kx-btn p-2 rounded-lg hover:scale-105" style={{ background: 'rgba(255,71,87,0.12)', color: 'var(--kx-short)' }}>
+                          <ThumbsDown className="w-4 h-4" />
+                        </button>
+                      </>
+                    )}
+                    <button 
+                      onClick={() => deleteSignal(signal.id)} 
+                      className="kx-btn p-2 rounded-lg hover:scale-105" 
+                      style={{ background: 'rgba(255,71,87,0.08)', color: 'var(--kx-text-muted)' }}
+                      title="Delete signal"
+                    >
+                      <XCircle className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
               </div>
             </motion.div>
           );
         })}
-
-        {!isLoading && filtered.length === 0 && (
-          <div className="text-center py-16" style={{ color: 'var(--kx-text-muted)' }}>
-            <p className="text-lg">No signals match your filters</p>
-            <p className="text-sm mt-1">Try adjusting the filter criteria</p>
-          </div>
-        )}
       </div>
+
+      {/* Logs Modal */}
+      {isLogsOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="kx-card w-full max-w-2xl max-h-[80vh] flex flex-col overflow-hidden shadow-2xl border-kx-accent/20"
+          >
+            <div className="p-4 border-b border-kx-border flex items-center justify-between bg-kx-bg-surface">
+              <div className="flex items-center gap-2">
+                <ScrollText className="w-5 h-5 text-kx-accent" />
+                <h2 className="font-bold">System Worker Logs</h2>
+              </div>
+              <button onClick={() => setIsLogsOpen(false)} className="p-1 hover:bg-kx-border rounded-md transition-colors">
+                <XCircle className="w-6 h-6 text-kx-text-muted" />
+              </button>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto p-4 space-y-2 font-mono text-xs bg-black/40">
+              {logs?.length === 0 && <p className="text-center py-8 text-kx-text-muted italic">No logs found yet...</p>}
+              {logs?.map((log) => {
+                const levelColors = {
+                  INFO: 'text-kx-text-secondary',
+                  WARN: 'text-kx-warning',
+                  ERROR: 'text-kx-short',
+                  SUCCESS: 'text-kx-success',
+                };
+                return (
+                  <div key={log.id} className="flex gap-3 py-1 border-b border-white/5 last:border-0 group">
+                    <span className="text-kx-text-muted shrink-0">[{new Date(log.timestamp).toLocaleTimeString()}]</span>
+                    <span className={`font-bold shrink-0 w-24 ${levelColors[log.level as keyof typeof levelColors]}`}>[{log.source}]</span>
+                    <span className="text-kx-text-primary break-all">{log.message}</span>
+                  </div>
+                );
+              })}
+            </div>
+            
+            <div className="p-3 bg-kx-bg-surface border-t border-kx-border flex justify-end">
+              <button 
+                onClick={() => setIsLogsOpen(false)}
+                className="kx-btn kx-btn-primary px-4 py-1.5 text-xs font-medium"
+              >
+                Close
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
     </div>
   );
 }

@@ -76,24 +76,39 @@ export async function POST(request: Request) {
     let candle: any = null;
 
     if (autoSelect) {
-      const best = await selectBestSignalCandidate({
+      const candidates = await selectBestSignalCandidate({
         timeframe,
         sideFilter,
         assetQuery,
-      });
+      }, 3); // Choose top 3 as requested
 
-      if (!best) {
+      if (candidates.length === 0) {
         return NextResponse.json(
-          { error: 'No pair passed the current filters and indicator requirements.' },
+          { error: 'No pairs passed the current filters and indicator requirements.' },
           { status: 400 }
         );
       }
 
-      symbol = best.symbol;
-      candle = best.candle;
-      await redis.set(`market:${symbol}:${timeframe}:latest`, JSON.stringify(candle));
+      // Add each candidate to the queue
+      const queuedSymbols: string[] = [];
+      for (const candidate of candidates) {
+        const { symbol: s, candle: c } = candidate;
+        await redis.set(`market:${s}:${timeframe}:latest`, JSON.stringify(c));
+        await signalQueue.add('generate-signal', { candle: c });
+        queuedSymbols.push(s);
+      }
+
+      return NextResponse.json(
+        { 
+          message: `${queuedSymbols.length} signals generation queued`, 
+          symbols: queuedSymbols, 
+          timeframe, 
+          autoSelected: true 
+        },
+        { status: 202 }
+      );
     } else {
-      const candles = await fetchRecentCandles(symbol, timeframe, 220);
+      const candles = await fetchRecentCandles(symbol, timeframe, 250);
       if (!candles || candles.length === 0) {
         return NextResponse.json(
           { error: `No candle data available for ${symbol} ${timeframe}.` },
@@ -102,14 +117,13 @@ export async function POST(request: Request) {
       }
       candle = candles[candles.length - 1];
       await redis.set(`market:${symbol}:${timeframe}:latest`, JSON.stringify(candle));
+      await signalQueue.add('generate-signal', { candle });
+
+      return NextResponse.json(
+        { message: 'Signal generation queued', symbol, timeframe, autoSelected: false },
+        { status: 202 }
+      );
     }
-
-    await signalQueue.add('generate-signal', { candle });
-
-    return NextResponse.json(
-      { message: 'Signal generation queued', symbol, timeframe, autoSelected: autoSelect },
-      { status: 202 }
-    );
   } catch (error) {
     console.error('[API] Failed to queue manual signal generation:', error);
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });

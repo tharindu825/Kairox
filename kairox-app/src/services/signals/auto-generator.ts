@@ -31,17 +31,18 @@ export function startAutoSignalGeneration(): () => void {
     if (running) return;
     running = true;
     try {
-      const best = await selectBestSignalCandidate({
+      const candidates = await selectBestSignalCandidate({
         timeframe,
         sideFilter,
         assetQuery,
-      });
+      }, 1);
 
-      if (!best) {
+      if (candidates.length === 0) {
         console.log('[Auto Signals] No candidate passed filters in this cycle.');
         return;
       }
 
+      const best = candidates[0];
       await redis.set(`market:${best.symbol}:${timeframe}:latest`, JSON.stringify(best.candle));
       await signalQueue.add('generate-signal', { candle: best.candle });
       console.log(

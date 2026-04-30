@@ -83,15 +83,14 @@ function passesIndicatorFilters(
   },
   close: number
 ): boolean {
-  if (features.trend === 'NEUTRAL') return false;
   if (!Number.isFinite(features.atr) || features.atr <= 0) return false;
 
-  const macdAligned = inferredSide === 'LONG' ? features.macd.histogram >= 0 : features.macd.histogram <= 0;
+  const macdAligned = inferredSide === 'LONG' ? features.macd.histogram >= -0.0001 : features.macd.histogram <= 0.0001;
   const rsiAligned =
     inferredSide === 'LONG'
-      ? features.rsi >= 45 && features.rsi <= 72
-      : features.rsi >= 28 && features.rsi <= 55;
-  const emaAligned = inferredSide === 'LONG' ? close >= features.ema20 && close >= features.ema50 : close <= features.ema20 && close <= features.ema50;
+      ? features.rsi >= 38 && features.rsi <= 78
+      : features.rsi >= 22 && features.rsi <= 62;
+  const emaAligned = inferredSide === 'LONG' ? close >= features.ema50 : close <= features.ema50;
 
   return macdAligned && rsiAligned && emaAligned;
 }
@@ -127,19 +126,38 @@ async function evaluateSymbol(
   };
 }
 
-export async function selectBestSignalCandidate(options: SignalSelectionOptions = {}): Promise<SignalSelectionResult | null> {
+export async function selectBestSignalCandidate(
+  options: SignalSelectionOptions = {},
+  limit = 1
+): Promise<SignalSelectionResult[]> {
   const timeframe = options.timeframe || '1h';
   const sideFilter: SideFilter = options.sideFilter || 'ALL';
   const assetQuery = (options.assetQuery || '').toUpperCase().trim();
   const symbols = await resolveCandidateSymbols(options.candidateSymbols);
   const filteredSymbols = assetQuery ? symbols.filter((symbol) => symbol.includes(assetQuery)) : symbols;
 
-  if (filteredSymbols.length === 0) return null;
+  if (filteredSymbols.length === 0) return [];
 
-  const evaluated = await Promise.all(filteredSymbols.map((symbol) => evaluateSymbol(symbol, timeframe, sideFilter)));
+  // Sort symbols to prioritize major ones if no query is provided
+  const sortedSymbols = assetQuery ? filteredSymbols : [...filteredSymbols].sort((a, b) => {
+    const majors = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT'];
+    const aMajor = majors.indexOf(a);
+    const bMajor = majors.indexOf(b);
+    if (aMajor !== -1 && bMajor !== -1) return aMajor - bMajor;
+    if (aMajor !== -1) return -1;
+    if (bMajor !== -1) return 1;
+    return 0;
+  });
+
+  // Limit to first 200 for performance as requested
+  const processingSymbols = sortedSymbols.slice(0, 200);
+
+  const evaluated = await Promise.all(processingSymbols.map((symbol) => evaluateSymbol(symbol, timeframe, sideFilter)));
   const candidates = evaluated.filter((candidate): candidate is SignalSelectionResult => candidate !== null);
-  if (candidates.length === 0) return null;
+  
+  if (candidates.length === 0) return [];
 
-  return candidates.sort((a, b) => b.score - a.score)[0];
+  // Return the top N candidates sorted by score
+  return candidates.sort((a, b) => b.score - a.score).slice(0, limit);
 }
 

@@ -91,10 +91,24 @@ export async function POST() {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const seedSymbols = ['BTCUSDT', 'ETHUSDT', 'ADAUSDT', 'SOLUSDT', 'XRPUSDT', 'BNBUSDT'];
-    const batch = db.batch();
+    // Fetch all tickers from Binance
+    const tickerUrl = 'https://api.binance.com/api/v3/ticker/24hr';
+    const tickerRes = await fetch(tickerUrl, { next: { revalidate: 60 } });
+    if (!tickerRes.ok) {
+      throw new Error('Failed to fetch tickers from Binance');
+    }
 
-    for (const symbol of seedSymbols) {
+    const allTickers: any[] = await tickerRes.json();
+    
+    // Filter for USDT pairs and sort by volume
+    const top200Symbols = allTickers
+      .filter(t => t.symbol.endsWith('USDT') && !t.symbol.includes('UP') && !t.symbol.includes('DOWN') && !t.symbol.includes('BEAR') && !t.symbol.includes('BULL'))
+      .sort((a, b) => parseFloat(b.quoteVolume) - parseFloat(a.quoteVolume))
+      .slice(0, 200)
+      .map(t => t.symbol);
+
+    const batch = db.batch();
+    for (const symbol of top200Symbols) {
       const ref = db.collection('assets').doc(symbol);
       batch.set(
         ref,
@@ -103,7 +117,6 @@ export async function POST() {
           name: symbol.replace('USDT', ''),
           category: 'CRYPTO',
           signalsCount: 0,
-          createdAt: new Date(),
           updatedAt: new Date(),
         },
         { merge: true }
@@ -112,7 +125,7 @@ export async function POST() {
 
     await batch.commit();
 
-    return NextResponse.json({ message: 'Assets synced', count: seedSymbols.length }, { status: 200 });
+    return NextResponse.json({ message: 'Assets synced', count: top200Symbols.length }, { status: 200 });
   } catch (error) {
     console.error('[API] Failed to sync assets:', error);
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });

@@ -5,6 +5,8 @@ import { signalQueue } from '@/workers/queues';
 import { paperTradingService } from '../paper-trading';
 
 export class MarketDataService {
+  private lastProcessed: Map<string, number> = new Map();
+
   /**
    * Starts the Binance WebSocket stream and binds listeners
    * to automatically persist closed candles to the database.
@@ -14,7 +16,13 @@ export class MarketDataService {
 
     // Live tick processing for paper trading
     binanceWS.on('candle', async (candle: NormalizedCandle) => {
-      // Throttle this in production, but for now process every tick
+      // Throttle: Only process one tick every 15 seconds per symbol
+      const now = Date.now();
+      const last = this.lastProcessed.get(candle.symbol) || 0;
+      if (now - last < 15000) return;
+      
+      this.lastProcessed.set(candle.symbol, now);
+
       try {
         await paperTradingService.processLiveTick(candle);
       } catch (error) {

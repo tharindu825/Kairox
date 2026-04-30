@@ -1,9 +1,9 @@
 import { Worker, Job } from 'bullmq';
 import { createBullMQConnection } from '@/lib/redis';
 import { db } from '@/lib/firebase-admin';
+import { Logger } from '@/lib/logger';
 import { indicatorService, FeatureBundle } from '@/services/indicators';
-import { openRouterService } from '@/services/ai/openrouter-service';
-import { openAIService } from '@/services/ai/openai-service';
+import { openRouterService, openRouterConfirmationService } from '@/services/ai/openrouter-service';
 import { riskEngine, PortfolioState } from '@/services/risk-engine';
 import { paperTradingService } from '@/services/paper-trading';
 import { alertQueue } from './queues';
@@ -101,24 +101,37 @@ export const signalWorker = new Worker(
   'signal-generation',
   async (job: Job<SignalJobData>) => {
     const { candle } = job.data;
-    console.log(`[Signal Worker] Processing new candle for ${candle.symbol} (${candle.timeframe})`);
+    await Logger.info(`Processing new candle for ${candle.symbol} (${candle.timeframe})`, 'Signal Worker');
 
     try {
-      // 1. Update Indicators & Generate Feature Bundle
+      // 1. Check for Duplicate Signals
+      const existingSignalSnapshot = await db.collection('signals')
+        .where('symbol', '==', candle.symbol)
+        .where('timeframe', '==', candle.timeframe)
+        .where('candleTimestamp', '==', candle.timestamp)
+        .limit(1)
+        .get();
+
+      if (!existingSignalSnapshot.empty) {
+        await Logger.info(`Signal already exists for ${candle.symbol} ${candle.timeframe} at this timestamp — Skipping.`, 'Signal Worker');
+        return { status: 'skipped', reason: 'duplicate_timestamp' };
+      }
+
+      // 2. Update Indicators & Generate Feature Bundle
       indicatorService.update(candle);
       const features = indicatorService.getFeatureBundle(candle);
 
       // We only generate signals if there's a strong trend or clear setup
+      // Note: We relaxed this to allow the AI to evaluate neutral markets for potential reversals or specific setups
       if (features.trend === 'NEUTRAL') {
-        console.log(`[Signal Worker] Skipping generation for ${candle.symbol} — Market is NEUTRAL.`);
-        return { status: 'skipped', reason: 'neutral_market' };
+        await Logger.info(`Market is NEUTRAL for ${candle.symbol} — Proceeding with AI evaluation.`, 'Signal Worker');
       }
 
       // 2. Dual API Model Execution (Run concurrently)
-      console.log(`[Signal Worker] Requesting AI analysis for ${candle.symbol}...`);
+      await Logger.info(`Requesting AI analysis for ${candle.symbol}...`, 'Signal Worker');
       const [primaryResult, confirmationResult] = await Promise.all([
         openRouterService.generateCompletion(candle.symbol, candle.timeframe, features),
-        openAIService.generateCompletion(candle.symbol, candle.timeframe, features),
+        openRouterConfirmationService.generateCompletion(candle.symbol, candle.timeframe, features),
       ]);
 
       if (!primaryResult.success || !primaryResult.data) {
@@ -161,6 +174,7 @@ export const signalWorker = new Worker(
       const signalData = {
         symbol: candle.symbol,
         timeframe: candle.timeframe,
+        candleTimestamp: candle.timestamp,
         side: primarySignal.side,
         confidence: primarySignal.confidence,
         entry: primarySignal.entry,
@@ -202,8 +216,8 @@ export const signalWorker = new Worker(
       const confVoteRef = db.collection('signalVotes').doc();
       batch.set(confVoteRef, {
         signalId: signalRef.id,
-        modelId: process.env.CONFIRMATION_MODEL || 'gpt-4o',
-        apiProvider: 'OPENAI',
+        modelId: process.env.CONFIRMATION_MODEL || 'google/gemini-pro-1.5',
+        apiProvider: 'OPENROUTER',
         role: 'CONFIRMATION',
         side: confSignal.side,
         confidence: confSignal.confidence,
@@ -217,7 +231,7 @@ export const signalWorker = new Worker(
       
       const signalRecord = { id: signalRef.id, ...signalData };
 
-      console.log(`[Signal Worker] Signal created: ${signalRecord.id} (Verdict: ${riskAssessment.verdict})`);
+      await Logger.success(`Signal created: ${signalRecord.id} (${candle.symbol} - ${riskAssessment.verdict})`, 'Signal Worker');
 
       // 7. Auto-execute Paper Trade if Approved
       if (signalStatus === 'APPROVED' && riskAssessment.positionSize > 0) {
@@ -226,9 +240,9 @@ export const signalWorker = new Worker(
             signalRecord.id,
             riskAssessment.positionSize
           );
-          console.log(`[Signal Worker] Paper trade opened for signal ${signalRecord.id}`);
+          await Logger.info(`Paper trade opened for signal ${signalRecord.id}`, 'Signal Worker');
         } catch (err) {
-          console.error(`[Signal Worker] Failed to open paper trade:`, err);
+          await Logger.error(`Failed to open paper trade: ${(err as Error).message}`, 'Signal Worker');
         }
       }
 

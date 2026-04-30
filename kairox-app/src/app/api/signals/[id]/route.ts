@@ -68,3 +68,55 @@ export async function PATCH(
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }
 }
+
+export async function DELETE(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const session = await auth();
+    if (!session) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const { id } = await params;
+    const signalRef = db.collection('signals').doc(id);
+    const signalDoc = await signalRef.get();
+
+    if (!signalDoc.exists) {
+      return NextResponse.json({ error: 'Signal not found' }, { status: 404 });
+    }
+
+    const signalData = signalDoc.data() as any;
+
+    // Delete the signal
+    await signalRef.delete();
+
+    // Also delete associated risk assessment and votes
+    const riskSnapshot = await db.collection('riskAssessments').where('signalId', '==', id).get();
+    const votesSnapshot = await db.collection('signalVotes').where('signalId', '==', id).get();
+    
+    const batch = db.batch();
+    riskSnapshot.docs.forEach(doc => batch.delete(doc.ref));
+    votesSnapshot.docs.forEach(doc => batch.delete(doc.ref));
+    await batch.commit();
+
+    // Audit log
+    await db.collection('auditLogs').add({
+      userId: (session.user as any)?.id || null,
+      action: 'SIGNAL_DELETED',
+      entity: 'Signal',
+      entityId: id,
+      details: {
+        symbol: signalData.symbol,
+        side: signalData.side,
+      },
+      createdAt: new Date(),
+    });
+
+    return NextResponse.json({ success: true, id });
+  } catch (error) {
+    console.error('[API] Failed to delete signal:', error);
+    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+  }
+}
