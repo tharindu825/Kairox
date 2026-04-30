@@ -1,43 +1,62 @@
-import { db } from './firebase-admin';
+import { getDb } from './mongodb';
 
-export type LogLevel = 'INFO' | 'WARN' | 'ERROR' | 'SUCCESS';
+export enum LogLevel {
+  INFO = 'INFO',
+  WARN = 'WARN',
+  ERROR = 'ERROR',
+  SUCCESS = 'SUCCESS'
+}
 
 export interface SystemLog {
-  message: string;
-  level: LogLevel;
-  source: string;
   timestamp: Date;
+  level: LogLevel;
+  message: string;
+  source: string;
+  metadata?: any;
 }
 
 export class Logger {
-  static async log(message: string, level: LogLevel = 'INFO', source: string = 'SYSTEM') {
-    const logEntry: SystemLog = {
-      message,
-      level,
-      source,
-      timestamp: new Date(),
-    };
+  private static async log(level: LogLevel, message: string, source: string, metadata?: any) {
+    const timestamp = new Date();
+    
+    // 1. Console Output
+    const color = {
+      [LogLevel.INFO]: '\x1b[34m',    // Blue
+      [LogLevel.WARN]: '\x1b[33m',    // Yellow
+      [LogLevel.ERROR]: '\x1b[31m',   // Red
+      [LogLevel.SUCCESS]: '\x1b[32m', // Green
+    }[level];
+    
+    console.log(`${color}[${timestamp.toLocaleTimeString()}] [${source}] ${level}: ${message}\x1b[0m`);
 
-    // Print to console
-    const color = level === 'ERROR' ? '\x1b[31m' : level === 'WARN' ? '\x1b[33m' : level === 'SUCCESS' ? '\x1b[32m' : '\x1b[37m';
-    console.log(`${color}[${source}] [${level}] ${message}\x1b[0m`);
-
+    // 2. Persist to MongoDB
     try {
-      // Persist to Firestore
-      await db.collection('systemLogs').add({
-        ...logEntry,
-        timestamp: new Date(), // Firestore uses its own Timestamp
+      const db = await getDb();
+      await db.collection('systemLogs').insertOne({
+        timestamp,
+        level,
+        message,
+        source,
+        metadata
       });
-
-      // Keep only last 100 logs (optional, for performance)
-      // This could be done via a scheduled function, but let's just add for now.
     } catch (err) {
-      console.error('Failed to persist log to Firestore', err);
+      console.error('[Logger] Failed to persist log to MongoDB:', err);
     }
   }
 
-  static info(message: string, source?: string) { return this.log(message, 'INFO', source); }
-  static warn(message: string, source?: string) { return this.log(message, 'WARN', source); }
-  static error(message: string, source?: string) { return this.log(message, 'ERROR', source); }
-  static success(message: string, source?: string) { return this.log(message, 'SUCCESS', source); }
+  static async info(message: string, source = 'System') {
+    await this.log(LogLevel.INFO, message, source);
+  }
+
+  static async warn(message: string, source = 'System') {
+    await this.log(LogLevel.WARN, message, source);
+  }
+
+  static async error(message: string, source = 'System', error?: any) {
+    await this.log(LogLevel.ERROR, message, source, error ? { error: error.message || error } : undefined);
+  }
+
+  static async success(message: string, source = 'System') {
+    await this.log(LogLevel.SUCCESS, message, source);
+  }
 }

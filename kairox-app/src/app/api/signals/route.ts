@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { db } from '@/lib/firebase-admin';
+import { getDb } from '@/lib/mongodb';
 import { auth } from '@/lib/auth';
 import { fetchRecentCandles, selectBestSignalCandidate, type SideFilter } from '@/services/signals/auto-selector';
 
@@ -15,37 +15,37 @@ export async function GET(request: Request) {
     const status = searchParams.get('status');
     const side = searchParams.get('side');
 
-    const baseSnapshot = await db.collection('signals').orderBy('createdAt', 'desc').limit(300).get();
-    const filteredDocs = baseSnapshot.docs.filter((doc) => {
-      const data = doc.data();
-      if (assetParam && assetParam !== 'ALL' && data.symbol !== assetParam) return false;
-      if (status && status !== 'ALL' && data.status !== status) return false;
-      if (side && side !== 'ALL' && data.side !== side) return false;
-      return true;
-    }).slice(0, 50);
+    const db = await getDb();
+    
+    const query: any = {};
+    if (assetParam && assetParam !== 'ALL') query.symbol = assetParam;
+    if (status && status !== 'ALL') query.status = status;
+    if (side && side !== 'ALL') query.side = side;
 
-    const signals = await Promise.all(filteredDocs.map(async (doc) => {
-      const data = doc.data();
-      const signalId = doc.id;
+    const baseSignals = await db.collection('signals')
+      .find(query)
+      .sort({ createdAt: -1 })
+      .limit(50)
+      .toArray();
+
+    const signals = await Promise.all(baseSignals.map(async (data) => {
+      const signalId = data._id.toString();
 
       // Fetch asset
-      const assetSnapshot = await db.collection('assets').where('symbol', '==', data.symbol).limit(1).get();
-      const asset = assetSnapshot.empty ? { symbol: data.symbol } : { id: assetSnapshot.docs[0].id, ...assetSnapshot.docs[0].data() };
-
+      const asset = await db.collection('assets').findOne({ symbol: data.symbol });
+      
       // Fetch risk assessment
-      const riskSnapshot = await db.collection('riskAssessments').where('signalId', '==', signalId).limit(1).get();
-      const riskAssessment = riskSnapshot.empty ? null : { id: riskSnapshot.docs[0].id, ...riskSnapshot.docs[0].data() };
+      const riskAssessment = await db.collection('riskAssessments').findOne({ signalId });
 
       // Fetch votes
-      const votesSnapshot = await db.collection('signalVotes').where('signalId', '==', signalId).get();
-      const votes = votesSnapshot.docs.map(v => ({ id: v.id, ...v.data() }));
+      const votes = await db.collection('signalVotes').find({ signalId }).toArray();
 
       return {
-        id: signalId,
         ...data,
-        asset,
-        riskAssessment,
-        votes,
+        id: signalId,
+        asset: asset ? { ...asset, id: asset._id.toString() } : { symbol: data.symbol },
+        riskAssessment: riskAssessment ? { ...riskAssessment, id: riskAssessment._id.toString() } : null,
+        votes: votes.map(v => ({ ...v, id: v._id.toString() })),
       };
     }));
 

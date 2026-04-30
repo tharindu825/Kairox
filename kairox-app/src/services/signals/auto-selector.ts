@@ -1,4 +1,4 @@
-import { db } from '@/lib/firebase-admin';
+import { getDb } from '@/lib/mongodb';
 import { IndicatorService } from '@/services/indicators';
 import type { NormalizedCandle } from '@/services/market-data/binance';
 
@@ -29,9 +29,10 @@ async function resolveCandidateSymbols(explicitSymbols?: string[]): Promise<stri
     return normalizeSymbols(explicitSymbols);
   }
 
-  const assetsSnapshot = await db.collection('assets').get();
+  const db = await getDb();
+  const assets = await db.collection('assets').find({}).toArray();
   const assetSymbols = normalizeSymbols(
-    assetsSnapshot.docs.map((doc) => String((doc.data() as { symbol?: string })?.symbol || ''))
+    assets.map((asset) => String(asset.symbol || ''))
   );
 
   return assetSymbols.length > 0 ? assetSymbols : DEFAULT_SYMBOLS;

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { db } from '@/lib/firebase-admin';
+import { getDb } from '@/lib/mongodb';
 import { auth } from '@/lib/auth';
 import { marketDataService } from '@/services/market-data';
 import { redis } from '@/lib/redis';
@@ -20,8 +20,9 @@ export async function GET() {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const assetsSnapshot = await db.collection('assets').get();
-    let assets = assetsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
+    const db = await getDb();
+    const assets = await db.collection('assets').find({}).toArray();
+    const formattedAssets = assets.map(doc => ({ id: doc._id.toString(), ...doc } as any));
 
     if (assets.length === 0) {
       const redisSymbols = await redis.hkeys('market:ticker').catch(() => []);
@@ -107,23 +108,25 @@ export async function POST() {
       .slice(0, 200)
       .map(t => t.symbol);
 
-    const batch = db.batch();
+    const db = await getDb();
+    
     for (const symbol of top200Symbols) {
-      const ref = db.collection('assets').doc(symbol);
-      batch.set(
-        ref,
+      await db.collection('assets').updateOne(
+        { symbol },
         {
-          symbol,
-          name: symbol.replace('USDT', ''),
-          category: 'CRYPTO',
-          signalsCount: 0,
-          updatedAt: new Date(),
+          $set: {
+            symbol,
+            name: symbol.replace('USDT', ''),
+            category: 'CRYPTO',
+            updatedAt: new Date(),
+          },
+          $setOnInsert: {
+            signalsCount: 0,
+          }
         },
-        { merge: true }
+        { upsert: true }
       );
     }
-
-    await batch.commit();
 
     return NextResponse.json({ message: 'Assets synced', count: top200Symbols.length }, { status: 200 });
   } catch (error) {

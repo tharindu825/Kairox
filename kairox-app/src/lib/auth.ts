@@ -1,11 +1,13 @@
 import NextAuth from 'next-auth';
 import Credentials from 'next-auth/providers/credentials';
 import bcrypt from 'bcryptjs';
-import { db } from '@/lib/firebase-admin';
+import { MongoDBAdapter } from '@auth/mongodb-adapter';
+import clientPromise, { getDb } from '@/lib/mongodb';
 import { authConfig } from './auth.config';
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   ...authConfig,
+  adapter: MongoDBAdapter(clientPromise),
   providers: [
     Credentials({
       name: 'credentials',
@@ -18,15 +20,14 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           return null;
         }
 
-        const usersRef = db.collection('users');
-        const snapshot = await usersRef.where('email', '==', credentials.email).limit(1).get();
+        const db = await getDb();
+        const user = await db.collection('users').findOne({ email: credentials.email });
 
-        if (snapshot.empty) {
+        if (!user) {
           return null;
         }
 
-        const userDoc = snapshot.docs[0];
-        const user = { id: userDoc.id, ...userDoc.data() } as any;
+        const userId = user._id.toString();
 
         if (!user.passwordHash) {
           return null;
@@ -42,7 +43,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         }
 
         return {
-          id: user.id,
+          id: userId,
           email: user.email,
           name: user.name,
           role: user.role,

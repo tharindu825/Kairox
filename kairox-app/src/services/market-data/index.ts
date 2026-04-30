@@ -1,4 +1,4 @@
-import { db } from '@/lib/firebase-admin';
+import { getDb } from '@/lib/mongodb';
 import { redis } from '@/lib/redis';
 import { binanceWS, NormalizedCandle } from './binance';
 import { signalQueue } from '@/workers/queues';
@@ -43,28 +43,26 @@ export class MarketDataService {
     });
   }
 
-  /**
-   * Persist a closed candle into Firestore MarketSnapshot structure.
-   */
   private async persistCandle(candle: NormalizedCandle) {
-    // In production, we'd batch these or queue them.
+    const db = await getDb();
     
     // First, ensure the asset exists in the DB
-    const assetRef = db.collection('assets').doc(candle.symbol);
-    const assetDoc = await assetRef.get();
-    
-    if (!assetDoc.exists) {
-      await assetRef.set({
-        symbol: candle.symbol,
-        name: candle.symbol.replace('USDT', ''),
-        category: 'CRYPTO',
-        signalsCount: 0,
-        createdAt: new Date(),
-      });
-    }
+    await db.collection('assets').updateOne(
+      { symbol: candle.symbol },
+      {
+        $setOnInsert: {
+          symbol: candle.symbol,
+          name: candle.symbol.replace('USDT', ''),
+          category: 'CRYPTO',
+          signalsCount: 0,
+          createdAt: new Date(),
+        }
+      },
+      { upsert: true }
+    );
 
     // Save the snapshot
-    await db.collection('marketSnapshots').add({
+    await db.collection('marketSnapshots').insertOne({
       symbol: candle.symbol,
       timeframe: candle.timeframe,
       candles: [candle],

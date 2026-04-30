@@ -1,4 +1,5 @@
-import { db } from '@/lib/firebase-admin';
+import { getDb } from '@/lib/mongodb';
+import { ObjectId } from 'mongodb';
 import { NormalizedCandle } from '../market-data/binance';
 import { alertQueue } from '@/workers/queues';
 import { Decimal } from 'decimal.js';
@@ -9,24 +10,23 @@ export class PaperTradingService {
    * a stop-loss or take-profit target has been hit.
    */
   async processLiveTick(candle: NormalizedCandle) {
-    // Only process every few seconds or when a significant move happens
-    // In production, you'd cache open orders in Redis to avoid querying Postgres on every tick.
-    const openOrdersSnapshot = await db.collection('paperOrders')
-      .where('symbol', '==', candle.symbol)
-      .get();
-      
-    if (openOrdersSnapshot.empty) return;
+    const db = await getDb();
     
-    const openOrders = await Promise.all(openOrdersSnapshot.docs
-      .filter(doc => doc.data().status === 'OPEN')
-      .map(async (doc) => {
-       const order = doc.data();
+    const openOrders = await db.collection('paperOrders')
+      .find({ 
+        symbol: candle.symbol,
+        status: 'OPEN'
+      })
+      .toArray();
+      
+    if (openOrders.length === 0) return;
+    
+    const ordersWithSignals = await Promise.all(openOrders.map(async (order) => {
        let signal = null;
        if (order.signalId) {
-          const sigDoc = await db.collection('signals').doc(order.signalId).get();
-          if (sigDoc.exists) signal = sigDoc.data();
+          signal = await db.collection('signals').findOne({ _id: new ObjectId(order.signalId) });
        }
-       return { id: doc.id, ...order, signal } as any;
+       return { id: order._id.toString(), ...order, signal } as any;
     }));
 
     for (const order of openOrders) {
@@ -77,12 +77,17 @@ export class PaperTradingService {
         }
 
         // Close Order
-        await db.collection('paperOrders').doc(order.id).update({
-          status: exitReason === 'STOP_LOSS' ? 'STOPPED' : 'CLOSED',
-          exitPrice: exitPrice.toNumber(),
-          pnl: pnl.toNumber(),
-          closedAt: new Date()
-        });
+        await db.collection('paperOrders').updateOne(
+          { _id: new ObjectId(order.id) },
+          {
+            $set: {
+              status: exitReason === 'STOP_LOSS' ? 'STOPPED' : 'CLOSED',
+              exitPrice: exitPrice.toNumber(),
+              pnl: pnl.toNumber(),
+              closedAt: new Date()
+            }
+          }
+        );
 
         // Dispatch Alert
         await alertQueue.add('send-telegram', {
@@ -97,15 +102,13 @@ export class PaperTradingService {
    * Converts an approved signal into an active paper order.
    */
   async executeApprovedSignal(signalId: string, quantity: number) {
-    const signalRef = db.collection('signals').doc(signalId);
-    const signalDoc = await signalRef.get();
+    const db = await getDb();
+    const signal = await db.collection('signals').findOne({ _id: new ObjectId(signalId) });
     
-    if (!signalDoc.exists) return;
-    const signal = signalDoc.data() as any;
+    if (!signal) return;
     
     if (signal.status !== 'APPROVED') return;
 
-    const orderRef = db.collection('paperOrders').doc();
     const orderData = {
       signalId: signalId,
       symbol: signal.symbol,
@@ -117,10 +120,10 @@ export class PaperTradingService {
       openedAt: new Date(),
     };
     
-    await orderRef.set(orderData);
+    const result = await db.collection('paperOrders').insertOne(orderData);
 
-    console.log(`[Paper Trade] Executed paper order ${orderRef.id} for ${signalId}`);
-    return { id: orderRef.id, ...orderData };
+    console.log(`[Paper Trade] Executed paper order ${result.insertedId} for ${signalId}`);
+    return { id: result.insertedId.toString(), ...orderData };
   }
 }
 

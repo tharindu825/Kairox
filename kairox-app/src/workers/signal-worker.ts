@@ -1,6 +1,7 @@
 import { Worker, Job } from 'bullmq';
 import { createBullMQConnection } from '@/lib/redis';
-import { db } from '@/lib/firebase-admin';
+import { getDb } from '@/lib/mongodb';
+import { ObjectId } from 'mongodb';
 import { Logger } from '@/lib/logger';
 import { indicatorService, FeatureBundle } from '@/services/indicators';
 import { openRouterService, openRouterConfirmationService } from '@/services/ai/openrouter-service';
@@ -21,57 +22,55 @@ export interface SignalJobData {
 async function getPortfolioState(): Promise<PortfolioState> {
   const PAPER_BALANCE = Number(process.env.PAPER_BALANCE || 10000);
 
-  // Count open trades
-  const openOrdersSnapshot = await db.collection('paperOrders').where('status', '==', 'OPEN').get();
+  const db = await getDb();
   
-  const openOrders = await Promise.all(openOrdersSnapshot.docs.map(async (doc) => {
-    const order = doc.data();
+  // Count open trades
+  const openOrders = await db.collection('paperOrders')
+    .find({ status: 'OPEN' })
+    .toArray();
+  
+  const ordersWithSignals = await Promise.all(openOrders.map(async (order) => {
     let signal = null;
     if (order.signalId) {
-       const sigSnap = await db.collection('signals').doc(order.signalId).get();
-       if (sigSnap.exists) {
-          const riskSnap = await db.collection('riskAssessments').where('signalId', '==', order.signalId).limit(1).get();
-          signal = { ...sigSnap.data(), riskAssessment: riskSnap.empty ? null : riskSnap.docs[0].data() } as any;
+       const sig = await db.collection('signals').findOne({ _id: new ObjectId(order.signalId) });
+       if (sig) {
+          const riskAssessment = await db.collection('riskAssessments').findOne({ signalId: order.signalId });
+          signal = { ...sig, id: sig._id.toString(), riskAssessment };
        }
     }
-    return { ...order, signal };
+    return { ...order, id: order._id.toString(), signal };
   }));
 
-  const openTrades = openOrders.length;
+  const openTrades = ordersWithSignals.length;
 
   // Sum risk exposure
-  const openRiskPercent = openOrders.reduce((sum, o) => {
-    return sum + (o.signal.riskAssessment?.riskPercent || 0);
+  const openRiskPercent = ordersWithSignals.reduce((sum, o) => {
+    return sum + (o.signal?.riskAssessment?.riskPercent || 0);
   }, 0);
 
   // Daily P&L
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
 
-  const closedTodaySnapshot = await db.collection('paperOrders')
-    .where('closedAt', '>=', todayStart)
-    .get();
-
-  const closedToday = closedTodaySnapshot.docs
-    .map(d => d.data())
-    .filter(o => ['CLOSED', 'STOPPED'].includes(o.status));
+  const closedToday = await db.collection('paperOrders')
+    .find({
+      closedAt: { $gte: todayStart },
+      status: { $in: ['CLOSED', 'STOPPED'] }
+    })
+    .toArray();
 
   const dailyPnL = closedToday.reduce((sum, o) => sum + (o.pnl ? new Decimal(o.pnl).toNumber() : 0), 0);
   const dailyPnLPercent = PAPER_BALANCE > 0 ? (dailyPnL / PAPER_BALANCE) * 100 : 0;
 
   // Correlated assets
-  const correlatedAssets = openOrders.map(o => o.signal?.symbol).filter(Boolean);
+  const correlatedAssets = ordersWithSignals.map(o => o.signal?.symbol).filter(Boolean);
 
   // Consecutive stop-outs
-  const recentOrdersSnapshot = await db.collection('paperOrders')
-    .orderBy('closedAt', 'desc')
-    .limit(20)
-    .get();
-
-  const recentOrders = recentOrdersSnapshot.docs
-    .map(d => d.data())
-    .filter(o => ['CLOSED', 'STOPPED'].includes(o.status))
-    .slice(0, 10);
+  const recentOrders = await db.collection('paperOrders')
+    .find({ status: { $in: ['CLOSED', 'STOPPED'] } })
+    .sort({ closedAt: -1 })
+    .limit(10)
+    .toArray();
 
   let consecutiveStopOuts = 0;
   let lastStopOutTime: Date | undefined;
@@ -79,7 +78,7 @@ async function getPortfolioState(): Promise<PortfolioState> {
     if (order.status === 'STOPPED') {
       consecutiveStopOuts++;
       if (!lastStopOutTime && order.closedAt) {
-        lastStopOutTime = order.closedAt.toDate ? order.closedAt.toDate() : new Date(order.closedAt);
+        lastStopOutTime = order.closedAt instanceof Date ? order.closedAt : new Date(order.closedAt);
       }
     } else {
       break;
@@ -104,15 +103,15 @@ export const signalWorker = new Worker(
     await Logger.info(`Processing new candle for ${candle.symbol} (${candle.timeframe})`, 'Signal Worker');
 
     try {
+      const db = await getDb();
       // 1. Check for Duplicate Signals
-      const existingSignalSnapshot = await db.collection('signals')
-        .where('symbol', '==', candle.symbol)
-        .where('timeframe', '==', candle.timeframe)
-        .where('candleTimestamp', '==', candle.timestamp)
-        .limit(1)
-        .get();
+      const existingSignal = await db.collection('signals').findOne({
+        symbol: candle.symbol,
+        timeframe: candle.timeframe,
+        candleTimestamp: candle.timestamp
+      });
 
-      if (!existingSignalSnapshot.empty) {
+      if (existingSignal) {
         await Logger.info(`Signal already exists for ${candle.symbol} ${candle.timeframe} at this timestamp — Skipping.`, 'Signal Worker');
         return { status: 'skipped', reason: 'duplicate_timestamp' };
       }
@@ -161,17 +160,16 @@ export const signalWorker = new Worker(
       }
 
       // 6. Persist Signal to DB
-      const assetSnapshot = await db.collection('assets').where('symbol', '==', candle.symbol).limit(1).get();
-      if (assetSnapshot.empty) throw new Error('Asset not found');
+      const asset = await db.collection('assets').findOne({ symbol: candle.symbol });
+      if (!asset) throw new Error('Asset not found');
 
       const signalStatus = riskAssessment.verdict === 'APPROVED' || riskAssessment.verdict === 'REDUCED'
         ? 'APPROVED'
         : 'BLOCKED';
 
-      const batch = db.batch();
-      
-      const signalRef = db.collection('signals').doc();
+      const signalId = new ObjectId();
       const signalData = {
+        _id: signalId,
         symbol: candle.symbol,
         timeframe: candle.timeframe,
         candleTimestamp: candle.timestamp,
@@ -185,11 +183,11 @@ export const signalWorker = new Worker(
         createdAt: new Date(),
         updatedAt: new Date(),
       };
-      batch.set(signalRef, signalData);
 
-      const riskRef = db.collection('riskAssessments').doc();
-      batch.set(riskRef, {
-        signalId: signalRef.id,
+      await db.collection('signals').insertOne(signalData);
+
+      await db.collection('riskAssessments').insertOne({
+        signalId: signalId.toString(),
         positionSize: riskAssessment.positionSize,
         riskPercent: riskAssessment.riskPercent,
         rewardToRisk: riskAssessment.rewardToRisk,
@@ -199,37 +197,34 @@ export const signalWorker = new Worker(
         reasons: riskAssessment.reasons,
       });
 
-      const primaryVoteRef = db.collection('signalVotes').doc();
-      batch.set(primaryVoteRef, {
-        signalId: signalRef.id,
-        modelId: process.env.PRIMARY_MODEL || 'anthropic/claude-sonnet-4',
-        apiProvider: 'OPENROUTER',
-        role: 'PRIMARY',
-        side: primarySignal.side,
-        confidence: primarySignal.confidence,
-        reasoning: primarySignal.reasoning,
-        rawResponse: primarySignal,
-        latencyMs: primaryResult.latencyMs || 0,
-        tokenUsage: primaryResult.tokenUsage || { prompt: 0, completion: 0, total: 0 },
-      });
-
-      const confVoteRef = db.collection('signalVotes').doc();
-      batch.set(confVoteRef, {
-        signalId: signalRef.id,
-        modelId: process.env.CONFIRMATION_MODEL || 'google/gemini-pro-1.5',
-        apiProvider: 'OPENROUTER',
-        role: 'CONFIRMATION',
-        side: confSignal.side,
-        confidence: confSignal.confidence,
-        reasoning: confSignal.reasoning,
-        rawResponse: confSignal,
-        latencyMs: confirmationResult.latencyMs || 0,
-        tokenUsage: confirmationResult.tokenUsage || { prompt: 0, completion: 0, total: 0 },
-      });
-
-      await batch.commit();
+      await db.collection('signalVotes').insertMany([
+        {
+          signalId: signalId.toString(),
+          modelId: process.env.PRIMARY_MODEL || 'anthropic/claude-sonnet-4',
+          apiProvider: 'OPENROUTER',
+          role: 'PRIMARY',
+          side: primarySignal.side,
+          confidence: primarySignal.confidence,
+          reasoning: primarySignal.reasoning,
+          rawResponse: primarySignal,
+          latencyMs: primaryResult.latencyMs || 0,
+          tokenUsage: primaryResult.tokenUsage || { prompt: 0, completion: 0, total: 0 },
+        },
+        {
+          signalId: signalId.toString(),
+          modelId: process.env.CONFIRMATION_MODEL || 'google/gemini-pro-1.5',
+          apiProvider: 'OPENROUTER',
+          role: 'CONFIRMATION',
+          side: confSignal.side,
+          confidence: confSignal.confidence,
+          reasoning: confSignal.reasoning,
+          rawResponse: confSignal,
+          latencyMs: confirmationResult.latencyMs || 0,
+          tokenUsage: confirmationResult.tokenUsage || { prompt: 0, completion: 0, total: 0 },
+        }
+      ]);
       
-      const signalRecord = { id: signalRef.id, ...signalData };
+      const signalRecord = { id: signalId.toString(), ...signalData };
 
       await Logger.success(`Signal created: ${signalRecord.id} (${candle.symbol} - ${riskAssessment.verdict})`, 'Signal Worker');
 

@@ -9,21 +9,19 @@ export async function GET() {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const snapshot = await db.collection('systemLogs')
-      .orderBy('timestamp', 'desc')
+    const db = await getDb();
+    const logs = await db.collection('systemLogs')
+      .find({})
+      .sort({ timestamp: -1 })
       .limit(50)
-      .get();
+      .toArray();
 
-    const logs = snapshot.docs.map(doc => {
-      const data = doc.data();
-      return {
-        id: doc.id,
-        ...data,
-        timestamp: data.timestamp.toDate(),
-      };
-    });
+    const formattedLogs = logs.map(log => ({
+      ...log,
+      id: log._id.toString(),
+    }));
 
-    return NextResponse.json(logs);
+    return NextResponse.json(formattedLogs);
   } catch (error) {
     console.error('[API] Failed to fetch system logs:', error);
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
