@@ -183,7 +183,33 @@ export default function RiskPage() {
                           {order.pnl != null ? `${order.pnl >= 0 ? '+' : ''}$${order.pnl.toFixed(2)}` : '—'}
                         </td>
                         <td className="text-xs" style={{ color: 'var(--kx-text-muted)' }}>
-                          {timeAgo(order.openedAt)}
+                          <div className="flex items-center justify-between gap-2">
+                            <span>{timeAgo(order.openedAt)}</span>
+                            {order.status === 'OPEN' && (
+                              <button
+                                onClick={async () => {
+                                  if (!window.confirm(`Close ${order.symbol} ${order.side} position?`)) return;
+                                  try {
+                                    const res = await fetch(`/api/paper-trades/${order.id}/close`, { method: 'POST' });
+                                    if (res.ok) {
+                                      mutatePaper();
+                                      mutateRisk();
+                                    } else {
+                                      const err = await res.json();
+                                      alert(`Failed to close trade: ${err.error}`);
+                                    }
+                                  } catch (err) {
+                                    console.error(err);
+                                    alert('Error closing trade');
+                                  }
+                                }}
+                                className="text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded bg-white/5 hover:bg-white/10 transition-colors"
+                                style={{ color: 'var(--kx-text-primary)' }}
+                              >
+                                Close
+                              </button>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     ))}

@@ -124,6 +124,8 @@ export class PaperTradingService {
 
     console.log(`[Paper Trade] Executed paper order ${result.insertedId} for ${signalId}`);
     return { id: result.insertedId.toString(), ...orderData };
+  }
+
   /**
    * Manually closes an open paper order at the current market price.
    */
