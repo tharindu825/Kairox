@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
-import { db } from '@/lib/firebase-admin';
+import { getDb } from '@/lib/mongodb';
 import { auth } from '@/lib/auth';
 import { Decimal } from 'decimal.js';
+import { marketDataService } from '@/services/market-data';
 
 export async function GET(request: Request) {
   try {
@@ -13,37 +14,63 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const status = searchParams.get('status');
 
-    let query: FirebaseFirestore.Query = db.collection('paperOrders');
+    const db = await getDb();
+    const query: any = {};
     if (status && status !== 'ALL') {
-      query = query.where('status', '==', status);
+      query.status = status;
     }
 
-    const snapshot = await query.orderBy('openedAt', 'desc').limit(50).get();
+    const docs = await db.collection('paperOrders')
+      .find(query)
+      .sort({ openedAt: -1 })
+      .limit(50)
+      .toArray();
 
-    const formatted = await Promise.all(snapshot.docs.map(async (doc) => {
-      const order = doc.data() as any;
+    const formatted = await Promise.all(docs.map(async (data) => {
+      const order = data;
+      const orderId = order._id.toString();
       
       let riskVerdict = null;
       if (order.signalId) {
-         const riskSnapshot = await db.collection('riskAssessments').where('signalId', '==', order.signalId).limit(1).get();
-         if (!riskSnapshot.empty) {
-           riskVerdict = riskSnapshot.docs[0].data().verdict;
+         const riskAssessment = await db.collection('riskAssessments').findOne({ signalId: order.signalId });
+         if (riskAssessment) {
+           riskVerdict = riskAssessment.verdict;
          }
       }
 
+      // Calculate unrealized PnL for open orders
+      let currentPnl = order.pnl ? new Decimal(order.pnl).toNumber() : null;
+      let currentPrice = null;
+
+      if (order.status === 'OPEN') {
+        const latestPrice = await marketDataService.getLatestPrice(order.symbol);
+        if (latestPrice) {
+          currentPrice = latestPrice;
+          const entry = new Decimal(order.entryPrice);
+          const current = new Decimal(latestPrice);
+          const qty = new Decimal(order.quantity);
+          
+          if (order.side === 'LONG') {
+            currentPnl = current.minus(entry).times(qty).toNumber();
+          } else {
+            currentPnl = entry.minus(current).times(qty).toNumber();
+          }
+        }
+      }
+
       return {
-        id: doc.id,
+        id: orderId,
         signalId: order.signalId,
         symbol: order.symbol,
         side: order.side,
         entryPrice: new Decimal(order.entryPrice).toNumber(),
-        exitPrice: order.exitPrice ? new Decimal(order.exitPrice).toNumber() : null,
+        exitPrice: order.exitPrice ? new Decimal(order.exitPrice).toNumber() : currentPrice,
         stopLoss: new Decimal(order.stopLoss).toNumber(),
         quantity: new Decimal(order.quantity).toNumber(),
         status: order.status,
-        pnl: order.pnl ? new Decimal(order.pnl).toNumber() : null,
-        openedAt: order.openedAt ? (order.openedAt.toDate ? order.openedAt.toDate() : new Date(order.openedAt)) : null,
-        closedAt: order.closedAt ? (order.closedAt.toDate ? order.closedAt.toDate() : new Date(order.closedAt)) : null,
+        pnl: currentPnl ? Math.round(currentPnl * 100) / 100 : 0,
+        openedAt: order.openedAt ? new Date(order.openedAt) : null,
+        closedAt: order.closedAt ? new Date(order.closedAt) : null,
         riskVerdict,
       };
     }));

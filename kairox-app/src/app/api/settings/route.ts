@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { db } from '@/lib/firebase-admin';
+import { getDb } from '@/lib/mongodb';
 import { auth } from '@/lib/auth';
 import { checkRateLimit, rateLimitHeaders } from '@/lib/rate-limit';
 import { z } from 'zod';
@@ -11,19 +11,17 @@ export async function GET() {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    const db = await getDb();
+
     // Load active strategy policy
-    const policySnapshot = await db.collection('strategyPolicy').where('isActive', '==', true).limit(1).get();
-    let policy = null;
-    if (!policySnapshot.empty) {
-      policy = { id: policySnapshot.docs[0].id, ...policySnapshot.docs[0].data() };
-    }
+    const policy = await db.collection('strategyPolicy').findOne({ isActive: true });
 
     // Load model configs
-    const modelConfigsSnapshot = await db.collection('modelConfig').where('isActive', '==', true).get();
-    const modelConfigs = modelConfigsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    const modelConfigsDocs = await db.collection('modelConfig').find({ isActive: true }).toArray();
+    const modelConfigs = modelConfigsDocs.map(doc => ({ id: doc._id.toString(), ...doc }));
 
     return NextResponse.json({
-      policy: policy || {
+      policy: policy ? { id: policy._id.toString(), ...policy } : {
         name: 'Default',
         maxRiskPercent: 2.0,
         maxOpenTrades: 5,
@@ -99,6 +97,8 @@ export async function PUT(request: Request) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    const db = await getDb();
+
     // Rate limit: 10 settings updates per minute
     const rl = checkRateLimit(`settings:${session.user?.email || 'anon'}`, { maxRequests: 10, windowSeconds: 60 });
     if (!rl.allowed) {
@@ -112,54 +112,62 @@ export async function PUT(request: Request) {
       const validated = updatePolicySchema.parse(body.data);
       const policyData = { name: 'Default', ...validated, isActive: true };
       
-      await db.collection('strategyPolicy').doc('Default').set(policyData, { merge: true });
+      await db.collection('strategyPolicy').updateOne(
+        { name: 'Default' },
+        { $set: policyData },
+        { upsert: true }
+      );
 
       return NextResponse.json({ message: 'Risk policy updated', policy: policyData });
     }
 
     if (type === 'models') {
       const validated = updateModelsSchema.parse(body.data);
-      const batch = db.batch();
 
       // Update model configs in DB
       if (validated.primary) {
-        const primaryRef = db.collection('modelConfig').doc('primary-config');
-        batch.set(primaryRef, {
-          id: 'primary-config',
-          modelId: validated.primary.modelId,
-          apiProvider: 'openrouter',
-          role: 'PRIMARY',
-          isActive: true,
-          parameters: {
-            temperature: validated.primary.temperature,
-            maxTokens: validated.primary.maxTokens,
+        await db.collection('modelConfig').updateOne(
+          { role: 'PRIMARY' },
+          {
+            $set: {
+              modelId: validated.primary.modelId,
+              apiProvider: 'openrouter',
+              isActive: true,
+              parameters: {
+                temperature: validated.primary.temperature,
+                maxTokens: validated.primary.maxTokens,
+              },
+              updatedAt: new Date(),
+            }
           },
-        }, { merge: true });
+          { upsert: true }
+        );
       }
 
       if (validated.confirmation) {
-        const confRef = db.collection('modelConfig').doc('confirmation-config');
-        batch.set(confRef, {
-          id: 'confirmation-config',
-          modelId: validated.confirmation.modelId,
-          apiProvider: 'openai',
-          role: 'CONFIRMATION',
-          isActive: true,
-          parameters: {
-            temperature: validated.confirmation.temperature,
-            maxTokens: validated.confirmation.maxTokens,
+        await db.collection('modelConfig').updateOne(
+          { role: 'CONFIRMATION' },
+          {
+            $set: {
+              modelId: validated.confirmation.modelId,
+              apiProvider: 'openai',
+              isActive: true,
+              parameters: {
+                temperature: validated.confirmation.temperature,
+                maxTokens: validated.confirmation.maxTokens,
+              },
+              updatedAt: new Date(),
+            }
           },
-        }, { merge: true });
+          { upsert: true }
+        );
       }
 
-      await batch.commit();
       return NextResponse.json({ message: 'Model configuration updated' });
     }
 
     if (type === 'alerts') {
       const validated = updateAlertsSchema.parse(body.data);
-      // In a real application, we would save this to the DB.
-      // For now, since settings returned are mocked for alerts, we just return success.
       return NextResponse.json({ message: 'Alert configuration updated', data: validated });
     }
 

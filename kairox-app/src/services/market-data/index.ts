@@ -72,11 +72,21 @@ export class MarketDataService {
   }
 
   /**
-   * Fetches the latest known price from Redis cache
+   * Fetches the latest known price from Redis cache, falling back to REST API
    */
   async getLatestPrice(symbol: string): Promise<number | null> {
-    const priceStr = await redis.hget('market:ticker', symbol);
-    return priceStr ? parseFloat(priceStr) : null;
+    try {
+      const priceStr = await redis.hget('market:ticker', symbol);
+      if (priceStr) return parseFloat(priceStr);
+
+      // Fallback to REST API if not in cache (e.g. symbol not actively streamed)
+      const { binanceREST } = await import('./binance-rest');
+      const ticker = await binanceREST.getTicker(symbol);
+      return ticker.price;
+    } catch (error) {
+      console.warn(`[Market Data] Failed to get price for ${symbol}:`, (error as Error).message);
+      return null;
+    }
   }
 }
 

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { db } from '@/lib/firebase-admin';
+import { getDb } from '@/lib/mongodb';
 import { auth } from '@/lib/auth';
 import { checkRateLimit, rateLimitHeaders } from '@/lib/rate-limit';
 import { z } from 'zod';
@@ -158,11 +158,12 @@ export async function POST(request: Request) {
     const winRate = totalTrades > 0 ? (wins / totalTrades) * 100 : 0;
     const expectancy = totalTrades > 0 ? totalPnL / totalTrades : 0;
 
-    // Save backtest run to DB
-    const assetSnapshot = await db.collection('assets').where('symbol', '==', asset).limit(1).get();
-    const assetId = assetSnapshot.empty ? asset : assetSnapshot.docs[0].id;
+    const db = await getDb();
 
-    const runRef = db.collection('backtestRuns').doc();
+    // Save backtest run to DB
+    const assetDoc = await db.collection('assets').findOne({ symbol: asset });
+    const assetId = assetDoc ? assetDoc._id.toString() : asset;
+
     const runData = {
       assetId,
       timeframe,
@@ -183,14 +184,12 @@ export async function POST(request: Request) {
       createdAt: new Date(),
     };
     
-    await runRef.set(runData);
-
-    const run = { id: runRef.id, ...runData };
+    const result = await db.collection('backtestRuns').insertOne(runData);
 
     return NextResponse.json({
-      id: run.id,
-      results: run.results,
-      trades: run.trades,
+      id: result.insertedId.toString(),
+      results: runData.results,
+      trades: runData.trades,
     });
   } catch (error) {
     if (error instanceof z.ZodError) {
@@ -208,12 +207,14 @@ export async function GET() {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const snapshot = await db.collection('backtestRuns')
-      .orderBy('createdAt', 'desc')
+    const db = await getDb();
+    const runsDocs = await db.collection('backtestRuns')
+      .find({})
+      .sort({ createdAt: -1 })
       .limit(10)
-      .get();
+      .toArray();
 
-    const runs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    const runs = runsDocs.map(doc => ({ id: doc._id.toString(), ...doc }));
 
     return NextResponse.json(runs);
   } catch (error) {

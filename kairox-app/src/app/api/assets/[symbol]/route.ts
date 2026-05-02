@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
-import { db } from '@/lib/firebase-admin';
+import { getDb } from '@/lib/mongodb';
 import { auth } from '@/lib/auth';
 import { redis } from '@/lib/redis';
+import { ObjectId } from 'mongodb';
 
 export async function GET(
   request: Request,
@@ -15,14 +16,15 @@ export async function GET(
 
     const { symbol } = await params;
     const sym = symbol.toUpperCase();
+    const db = await getDb();
 
     // Get asset from DB
-    const assetSnapshot = await db.collection('assets').where('symbol', '==', sym).limit(1).get();
+    const asset = await db.collection('assets').findOne({ symbol: sym });
 
-    if (assetSnapshot.empty) {
+    if (!asset) {
       return NextResponse.json({ error: 'Asset not found' }, { status: 404 });
     }
-    const asset = { id: assetSnapshot.docs[0].id, ...assetSnapshot.docs[0].data() };
+    const formattedAsset = { id: asset._id.toString(), ...asset };
 
     // Fetch historical candles from Binance REST API
     const interval = '1h';
@@ -44,46 +46,44 @@ export async function GET(
     const currentPrice = priceStr ? parseFloat(priceStr) : (candles.length > 0 ? candles[candles.length - 1].close : 0);
 
     // Get recent signals for this asset
-    const signalsSnapshot = await db.collection('signals')
-      .where('symbol', '==', sym)
-      .orderBy('createdAt', 'desc')
+    const signalsDocs = await db.collection('signals')
+      .find({ symbol: sym })
+      .sort({ createdAt: -1 })
       .limit(20)
-      .get();
+      .toArray();
       
-    const signals = await Promise.all(signalsSnapshot.docs.map(async (doc) => {
-      const signalData = doc.data();
-      const signalId = doc.id;
+    const signals = await Promise.all(signalsDocs.map(async (data) => {
+      const signalId = data._id.toString();
       
-      const riskSnapshot = await db.collection('riskAssessments').where('signalId', '==', signalId).limit(1).get();
-      const votesSnapshot = await db.collection('signalVotes').where('signalId', '==', signalId).get();
+      const riskAssessment = await db.collection('riskAssessments').findOne({ signalId });
+      const votes = await db.collection('signalVotes').find({ signalId }).toArray();
       
       return {
+        ...data,
         id: signalId,
-        ...signalData,
-        riskAssessment: riskSnapshot.empty ? null : { id: riskSnapshot.docs[0].id, ...riskSnapshot.docs[0].data() },
-        votes: votesSnapshot.docs.map(v => ({ id: v.id, ...v.data() }))
+        riskAssessment: riskAssessment ? { id: riskAssessment._id.toString(), ...riskAssessment } : null,
+        votes: votes.map(v => ({ id: v._id.toString(), ...v }))
       };
     }));
 
     // Get open paper trades for this asset
-    const openTradesSnapshot = await db.collection('paperOrders')
-      .where('symbol', '==', sym)
-      .where('status', '==', 'OPEN')
-      .get();
+    const openTradesDocs = await db.collection('paperOrders')
+      .find({ symbol: sym, status: 'OPEN' })
+      .toArray();
       
-    const openTrades = await Promise.all(openTradesSnapshot.docs.map(async (doc) => {
-      const tradeData = doc.data();
+    const openTrades = await Promise.all(openTradesDocs.map(async (data) => {
+      const tradeId = data._id.toString();
       // fetch signal
       let signal = null;
-      if (tradeData.signalId) {
-        const sigDoc = await db.collection('signals').doc(tradeData.signalId).get();
-        if (sigDoc.exists) signal = { id: sigDoc.id, ...sigDoc.data() };
+      if (data.signalId) {
+        const sig = await db.collection('signals').findOne({ _id: new ObjectId(data.signalId) });
+        if (sig) signal = { id: sig._id.toString(), ...sig };
       }
-      return { id: doc.id, ...tradeData, signal };
+      return { ...data, id: tradeId, signal };
     }));
 
     return NextResponse.json({
-      asset,
+      asset: formattedAsset,
       currentPrice,
       candles,
       signals,

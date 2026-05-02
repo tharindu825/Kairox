@@ -10,7 +10,7 @@ async function bootstrap() {
   console.log('Starting Kairox background workers...');
 
   // 1. Priming Indicators
-  const symbols = ['BTCUSDT', 'ETHUSDT'];
+  const symbols = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'ADAUSDT'];
   const timeframes = ['1h', '4h'];
 
   console.log('[Bootstrap] Priming indicators with historical data...');

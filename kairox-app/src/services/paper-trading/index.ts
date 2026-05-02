@@ -124,6 +124,56 @@ export class PaperTradingService {
 
     console.log(`[Paper Trade] Executed paper order ${result.insertedId} for ${signalId}`);
     return { id: result.insertedId.toString(), ...orderData };
+  /**
+   * Manually closes an open paper order at the current market price.
+   */
+  async closeOrder(orderId: string, exitReason: string = 'MANUAL_CLOSE') {
+    const db = await getDb();
+    const order = await db.collection('paperOrders').findOne({ _id: new ObjectId(orderId) });
+
+    if (!order || order.status !== 'OPEN') {
+      throw new Error('Order not found or already closed');
+    }
+
+    // Get current price
+    const { marketDataService } = await import('../market-data');
+    const currentPriceRaw = await marketDataService.getLatestPrice(order.symbol);
+    
+    if (!currentPriceRaw) {
+      throw new Error(`Could not fetch current price for ${order.symbol}`);
+    }
+
+    const currentPrice = new Decimal(currentPriceRaw);
+    const entryPrice = new Decimal(order.entryPrice);
+    const quantity = new Decimal(order.quantity);
+
+    let pnl = new Decimal(0);
+    if (order.side === 'LONG') {
+      pnl = currentPrice.minus(entryPrice).times(quantity);
+    } else {
+      pnl = entryPrice.minus(currentPrice).times(quantity);
+    }
+
+    await db.collection('paperOrders').updateOne(
+      { _id: new ObjectId(orderId) },
+      {
+        $set: {
+          status: 'CLOSED',
+          exitPrice: currentPrice.toNumber(),
+          pnl: pnl.toNumber(),
+          closedAt: new Date(),
+          exitReason: exitReason
+        }
+      }
+    );
+
+    // Dispatch Alert
+    await alertQueue.add('send-telegram', {
+      signalId: order.signalId,
+      message: `⏹️ TRADE CLOSED MANUALLY: ${order.symbol}\n\nSide: ${order.side}\nExit Price: ${currentPrice}\nPnL: $${pnl.toFixed(2)}`
+    });
+
+    return { id: orderId, pnl: pnl.toNumber(), exitPrice: currentPrice.toNumber() };
   }
 }
 

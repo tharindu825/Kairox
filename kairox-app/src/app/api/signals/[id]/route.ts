@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
-import { db } from '@/lib/firebase-admin';
+import { getDb } from '@/lib/mongodb';
 import { auth } from '@/lib/auth';
 import { z } from 'zod';
+import { ObjectId } from 'mongodb';
 
 const updateSchema = z.object({
   status: z.enum(['APPROVED', 'BLOCKED']),
@@ -21,42 +22,44 @@ export async function PATCH(
     const body = await request.json();
     const { status } = updateSchema.parse(body);
 
+    const db = await getDb();
+    
     // Verify signal exists and is in PENDING state
-    const signalRef = db.collection('signals').doc(id);
-    const signalDoc = await signalRef.get();
+    const signal = await db.collection('signals').findOne({ _id: new ObjectId(id) });
 
-    if (!signalDoc.exists) {
+    if (!signal) {
       return NextResponse.json({ error: 'Signal not found' }, { status: 404 });
     }
 
-    const signalData = signalDoc.data() as any;
-
-    if (signalData.status !== 'PENDING') {
+    if (signal.status !== 'PENDING') {
       return NextResponse.json(
-        { error: `Signal is already ${signalData.status}` },
+        { error: `Signal is already ${signal.status}` },
         { status: 400 }
       );
     }
 
     // Update signal status
-    await signalRef.update({ status, updatedAt: new Date() });
+    await db.collection('signals').updateOne(
+      { _id: new ObjectId(id) },
+      { $set: { status, updatedAt: new Date() } }
+    );
 
     // Audit log
-    await db.collection('auditLogs').add({
+    await db.collection('auditLogs').insertOne({
       userId: (session.user as any)?.id || null,
       action: status === 'APPROVED' ? 'SIGNAL_APPROVED' : 'SIGNAL_BLOCKED',
       entity: 'Signal',
       entityId: id,
       details: {
-        symbol: signalData.symbol,
-        side: signalData.side,
-        previousStatus: signalData.status,
+        symbol: signal.symbol,
+        side: signal.side,
+        previousStatus: signal.status,
         newStatus: status,
       },
       createdAt: new Date(),
     });
 
-    return NextResponse.json({ id, ...signalData, status });
+    return NextResponse.json({ id, ...signal, status });
   } catch (error) {
     if (error instanceof z.ZodError) {
       return NextResponse.json(
@@ -80,36 +83,30 @@ export async function DELETE(
     }
 
     const { id } = await params;
-    const signalRef = db.collection('signals').doc(id);
-    const signalDoc = await signalRef.get();
+    const db = await getDb();
 
-    if (!signalDoc.exists) {
+    const signal = await db.collection('signals').findOne({ _id: new ObjectId(id) });
+
+    if (!signal) {
       return NextResponse.json({ error: 'Signal not found' }, { status: 404 });
     }
 
-    const signalData = signalDoc.data() as any;
-
     // Delete the signal
-    await signalRef.delete();
+    await db.collection('signals').deleteOne({ _id: new ObjectId(id) });
 
     // Also delete associated risk assessment and votes
-    const riskSnapshot = await db.collection('riskAssessments').where('signalId', '==', id).get();
-    const votesSnapshot = await db.collection('signalVotes').where('signalId', '==', id).get();
-    
-    const batch = db.batch();
-    riskSnapshot.docs.forEach(doc => batch.delete(doc.ref));
-    votesSnapshot.docs.forEach(doc => batch.delete(doc.ref));
-    await batch.commit();
+    await db.collection('riskAssessments').deleteMany({ signalId: id });
+    await db.collection('signalVotes').deleteMany({ signalId: id });
 
     // Audit log
-    await db.collection('auditLogs').add({
+    await db.collection('auditLogs').insertOne({
       userId: (session.user as any)?.id || null,
       action: 'SIGNAL_DELETED',
       entity: 'Signal',
       entityId: id,
       details: {
-        symbol: signalData.symbol,
-        side: signalData.side,
+        symbol: signal.symbol,
+        side: signal.side,
       },
       createdAt: new Date(),
     });

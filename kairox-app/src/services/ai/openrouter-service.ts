@@ -56,11 +56,11 @@ export class OpenRouterService {
     this.baseUrl = process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1';
     
     if (role === 'PRIMARY') {
-      this.model = process.env.PRIMARY_MODEL || 'anthropic/claude-sonnet-4';
-      this.fallbackModel = process.env.PRIMARY_FALLBACK_MODEL || 'google/gemini-2.5-pro';
+      this.model = process.env.PRIMARY_MODEL || 'google/gemini-2.0-flash-001';
+      this.fallbackModel = process.env.PRIMARY_FALLBACK_MODEL || 'google/gemini-2.5-flash';
     } else {
-      this.model = process.env.CONFIRMATION_MODEL || 'meta-llama/llama-3-70b-instruct';
-      this.fallbackModel = process.env.CONFIRMATION_FALLBACK_MODEL || 'anthropic/claude-3-haiku';
+      this.model = process.env.CONFIRMATION_MODEL || 'google/gemini-2.0-flash-001';
+      this.fallbackModel = process.env.CONFIRMATION_FALLBACK_MODEL || 'meta-llama/llama-3.1-8b-instruct';
     }
   }
 
@@ -80,6 +80,7 @@ export class OpenRouterService {
     // Try primary model, then fallback
     for (const modelId of [this.model, this.fallbackModel]) {
       try {
+        console.log(`[OpenRouter] Attempting AI analysis with model: ${modelId} (${this.role})`);
         const result = await this.callAPI(modelId, systemPrompt, userPrompt);
         return result;
       } catch (error) {

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { db } from '@/lib/firebase-admin';
+import { getDb } from '@/lib/mongodb';
 import { auth } from '@/lib/auth';
 import { marketDataService } from '@/services/market-data';
 import { Decimal } from 'decimal.js';
@@ -11,15 +11,16 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    const db = await getDb();
+
     // 1. Fetch all open orders
-    const openOrdersSnapshot = await db.collection('paperOrders').where('status', '==', 'OPEN').get();
+    const openOrdersDocs = await db.collection('paperOrders').find({ status: 'OPEN' }).toArray();
     
     let closedCount = 0;
-    const batch = db.batch();
 
     // 2. Close each open order at the latest market price
-    for (const doc of openOrdersSnapshot.docs) {
-      const order = doc.data() as any;
+    for (const data of openOrdersDocs) {
+      const order = data;
       if (!order.symbol) continue;
 
       const currentPriceNum = await marketDataService.getLatestPrice(order.symbol);
@@ -36,42 +37,44 @@ export async function POST(request: Request) {
         pnl = entryPrice.minus(currentPrice).times(quantity);
       }
 
-      batch.update(doc.ref, {
-        status: 'STOPPED', // Mark as STOPPED for the kill switch
-        exitPrice: currentPrice.toNumber(),
-        pnl: pnl.toNumber(),
-        closedAt: new Date(),
-      });
+      await db.collection('paperOrders').updateOne(
+        { _id: data._id },
+        {
+          $set: {
+            status: 'STOPPED', // Mark as STOPPED for the kill switch
+            exitPrice: currentPrice.toNumber(),
+            pnl: pnl.toNumber(),
+            closedAt: new Date(),
+          }
+        }
+      );
 
       closedCount++;
     }
 
     // 3. Block all pending signals to prevent new entries
-    const pendingSignalsSnapshot = await db.collection('signals').where('status', '==', 'PENDING').get();
-    for (const doc of pendingSignalsSnapshot.docs) {
-      batch.update(doc.ref, { status: 'BLOCKED', updatedAt: new Date() });
-    }
+    const pendingSignalsResult = await db.collection('signals').updateMany(
+      { status: 'PENDING' },
+      { $set: { status: 'BLOCKED', updatedAt: new Date() } }
+    );
 
     // 4. Audit Log
-    const auditLogRef = db.collection('auditLogs').doc();
-    batch.set(auditLogRef, {
+    await db.collection('auditLogs').insertOne({
       userId: (session.user as any)?.id || null,
       action: 'EMERGENCY_KILL_SWITCH',
       entity: 'System',
       entityId: 'ALL',
       details: {
         closedOrdersCount: closedCount,
-        blockedSignalsCount: pendingSignalsSnapshot.size,
+        blockedSignalsCount: pendingSignalsResult.modifiedCount,
       },
       createdAt: new Date(),
     });
 
-    await batch.commit();
-
     return NextResponse.json({
       message: 'Emergency kill switch executed successfully',
       closedOrders: closedCount,
-      blockedSignals: pendingSignalsSnapshot.size,
+      blockedSignals: pendingSignalsResult.modifiedCount,
     });
   } catch (error) {
     console.error('[API] Kill switch failed:', error);

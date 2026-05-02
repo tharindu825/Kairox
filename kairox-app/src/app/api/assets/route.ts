@@ -22,15 +22,15 @@ export async function GET() {
 
     const db = await getDb();
     const rawAssets = await db.collection('assets').find({}).toArray();
-    let assets = rawAssets.map(doc => ({ id: doc._id.toString(), ...doc } as any));
+    let assetList = rawAssets.map(doc => ({ id: doc._id.toString(), ...doc } as any));
 
-    if (assets.length === 0) {
+    if (assetList.length === 0) {
       const redisSymbols = await redis.hkeys('market:ticker').catch(() => []);
       const fallbackSymbols = redisSymbols.length > 0
         ? redisSymbols
         : ['BTCUSDT', 'ETHUSDT', 'ADAUSDT', 'SOLUSDT', 'XRPUSDT', 'BNBUSDT'];
 
-      assets = fallbackSymbols.map((symbol) => ({
+      assetList = fallbackSymbols.map((symbol) => ({
         id: symbol,
         symbol,
         name: symbol.replace('USDT', ''),
@@ -40,7 +40,7 @@ export async function GET() {
     }
 
     // Fetch 24h ticker data from Binance for all symbols in one batch
-    const symbols = assets.map(a => a.symbol);
+    const symbols = assetList.map(a => a.symbol);
     const tickerMap = new Map<string, BinanceTicker>();
 
     try {
@@ -57,7 +57,7 @@ export async function GET() {
     }
 
     // Hydrate with real-time price and 24h data
-    const populated = await Promise.all(assets.map(async (asset) => {
+    const populated = await Promise.all(assetList.map(async (asset) => {
       const ticker = tickerMap.get(asset.symbol);
       const redisPrice = await marketDataService.getLatestPrice(asset.symbol);
       const currentPrice = redisPrice || (ticker ? parseFloat(ticker.lastPrice) : 0);

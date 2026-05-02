@@ -117,6 +117,16 @@ export const signalWorker = new Worker(
       }
 
       // 2. Update Indicators & Generate Feature Bundle
+      // Check if indicators are primed for this symbol/timeframe
+      const featuresBefore = indicatorService.getFeatureBundle(candle);
+      if (featuresBefore.trend === 'NEUTRAL' && featuresBefore.ema200 === candle.close) {
+        // Likely not primed. Let's fetch history.
+        const { binanceREST } = await import('@/services/market-data/binance-rest');
+        await Logger.info(`Priming indicators on-the-fly for ${candle.symbol}...`, 'Signal Worker');
+        const klines = await binanceREST.getKlines(candle.symbol, candle.timeframe, 250);
+        indicatorService.initialize(candle.symbol, candle.timeframe, klines);
+      }
+
       indicatorService.update(candle);
       const features = indicatorService.getFeatureBundle(candle);
 
