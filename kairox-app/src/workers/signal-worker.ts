@@ -104,13 +104,19 @@ export const signalWorker = new Worker(
 
     try {
       const db = await getDb();
-      // 1. Check for Duplicate Signals
-      const existingSignal = await db.collection('signals').findOne({
-        symbol: candle.symbol,
-        timeframe: candle.timeframe,
-        candleTimestamp: candle.timestamp
-      });
-
+      // 1. Check for Duplicate Signals or Active Trades
+      const [existingSignal, activeTrade] = await Promise.all([
+        db.collection('signals').findOne({
+          symbol: candle.symbol,
+          timeframe: candle.timeframe,
+          candleTimestamp: candle.timestamp
+        }),
+        db.collection('paperOrders').findOne({
+          symbol: candle.symbol,
+          status: 'OPEN'
+        })
+      ]);
+      
       if (existingSignal) {
         await Logger.info(`Signal already exists for ${candle.symbol} ${candle.timeframe} at this timestamp — Skipping.`, 'Signal Worker');
         return { status: 'skipped', reason: 'duplicate_timestamp' };
@@ -152,6 +158,18 @@ export const signalWorker = new Worker(
 
       const primarySignal = primaryResult.data;
       const confSignal = confirmationResult.data;
+
+      // 1b. Active Trade Check & Trend Reversal Warning
+      if (activeTrade && primarySignal.side !== 'HOLD') {
+        if (activeTrade.side === primarySignal.side) {
+          await Logger.info(`Active ${activeTrade.side} trade already exists for ${candle.symbol} — Skipping new signal.`, 'Signal Worker');
+          return { status: 'skipped', reason: 'active_trade_exists' };
+        } else {
+          // Trend Reversal!
+          await Logger.info(`TREND CHANGE WARNING for ${candle.symbol}: Active ${activeTrade.side} vs New ${primarySignal.side}`, 'Signal Worker');
+          primarySignal.reasoning = `⚠️ TREND CHANGE WARNING: Current ${activeTrade.side} position detected while AI suggests ${primarySignal.side}. ${primarySignal.reasoning}`;
+        }
+      }
 
       // 3. Model Agreement Check
       const isAgreement = primarySignal.side === confSignal.side;

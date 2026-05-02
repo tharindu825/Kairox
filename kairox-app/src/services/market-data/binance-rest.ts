@@ -36,6 +36,20 @@ export class BinanceRESTService {
       return [];
     }
   }
+
+  /**
+   * Fetches the latest ticker price for a symbol.
+   */
+  async getTicker(symbol: string): Promise<{ symbol: string; price: number }> {
+    const url = `${this.baseUrl}/api/v3/ticker/price?symbol=${symbol.toUpperCase()}`;
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`Binance API Error: ${response.statusText}`);
+    const data = await response.json();
+    return {
+      symbol: data.symbol,
+      price: parseFloat(data.price)
+    };
+  }
 }
 
 export const binanceREST = new BinanceRESTService();

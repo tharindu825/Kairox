@@ -29,7 +29,7 @@ export class PaperTradingService {
        return { id: order._id.toString(), ...order, signal } as any;
     }));
 
-    for (const order of openOrders) {
+    for (const order of ordersWithSignals) {
       const currentPrice = new Decimal(candle.close);
       const stopLoss = new Decimal(order.stopLoss);
       let exitReason: 'STOP_LOSS' | 'TAKE_PROFIT' | null = null;
