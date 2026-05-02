@@ -126,11 +126,11 @@ export async function GET() {
     // ─── Open Positions for Paper Trades Table ──────────────────────────
     const openPositions = openOrders.map(order => ({
       id: order.id,
-      symbol: order.signal?.asset?.symbol,
+      symbol: order.symbol || order.signal?.asset?.symbol || 'Unknown',
       side: order.side,
-      entryPrice: new Decimal(order.entryPrice).toNumber(),
-      stopLoss: new Decimal(order.stopLoss).toNumber(),
-      quantity: new Decimal(order.quantity).toNumber(),
+      entryPrice: new Decimal(order.entryPrice || 0).toNumber(),
+      stopLoss: new Decimal(order.stopLoss || 0).toNumber(),
+      quantity: new Decimal(order.quantity || 0).toNumber(),
       openedAt: order.openedAt ? new Date(order.openedAt) : null,
       signalId: order.signalId,
     }));

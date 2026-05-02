@@ -14,6 +14,7 @@ export async function GET(request: Request) {
     const assetParam = searchParams.get('asset');
     const status = searchParams.get('status');
     const side = searchParams.get('side');
+    const limit = parseInt(searchParams.get('limit') || '10', 10);
 
     const db = await getDb();
     
@@ -25,7 +26,7 @@ export async function GET(request: Request) {
     const baseSignals = await db.collection('signals')
       .find(query)
       .sort({ createdAt: -1 })
-      .limit(50)
+      .limit(limit)
       .toArray();
 
     const signals = await Promise.all(baseSignals.map(async (data) => {

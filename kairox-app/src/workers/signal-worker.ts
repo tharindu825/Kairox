@@ -63,7 +63,9 @@ async function getPortfolioState(): Promise<PortfolioState> {
   const dailyPnLPercent = PAPER_BALANCE > 0 ? (dailyPnL / PAPER_BALANCE) * 100 : 0;
 
   // Correlated assets
-  const correlatedAssets = ordersWithSignals.map(o => o.signal?.symbol).filter(Boolean);
+  const correlatedAssets = ordersWithSignals
+    .map(o => o.signal?.symbol)
+    .filter((symbol): symbol is string => typeof symbol === 'string');
 
   // Consecutive stop-outs
   const recentOrders = await db.collection('paperOrders')

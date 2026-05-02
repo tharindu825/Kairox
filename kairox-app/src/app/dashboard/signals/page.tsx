@@ -53,7 +53,9 @@ export default function SignalsPage() {
   const [filterAsset, setFilterAsset] = useState('ALL');
   const [filterStatus, setFilterStatus] = useState('ALL');
   const [filterSide, setFilterSide] = useState('ALL');
+  const [filterQuality, setFilterQuality] = useState('ALL');
   const [searchQuery, setSearchQuery] = useState('');
+  const [displayLimit, setDisplayLimit] = useState(10);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSyncingAssets, setIsSyncingAssets] = useState(false);
   const [isLogsOpen, setIsLogsOpen] = useState(false);
@@ -62,7 +64,7 @@ export default function SignalsPage() {
 
   // Fetch signals from API
   const { data: signals, error, isLoading, mutate } = useSWR<any[]>(
-    `/api/signals?asset=${filterAsset}&status=${filterStatus}&side=${filterSide}`, 
+    `/api/signals?asset=${filterAsset}&status=${filterStatus}&side=${filterSide}&limit=${displayLimit}`, 
     fetcher,
     { refreshInterval: 5000 } // Poll every 5s
   );
@@ -158,6 +160,11 @@ export default function SignalsPage() {
     const symbol = String(s?.asset?.symbol || s?.symbol || '').toLowerCase();
     const query = searchQuery.toLowerCase().trim();
     if (query && !symbol.includes(query)) return false;
+
+    // Quality Filter
+    if (filterQuality === 'HIGH_PROB' && s.confidence < 0.7) return false;
+    if (filterQuality === 'ELITE_ONLY' && s.confidence < 0.85) return false;
+
     return true;
   });
 
@@ -193,6 +200,34 @@ export default function SignalsPage() {
             <ScrollText className="w-3.5 h-3.5" />
             System Logs
           </button>
+          
+          <div className="flex items-center gap-1 bg-white/5 backdrop-blur-md rounded-xl p-1 border border-white/10 shadow-xl">
+            {[
+              { val: 10, label: 'TOP 10', color: 'from-indigo-500 to-blue-600' },
+              { val: 20, label: 'TOP 20', color: 'from-blue-500 to-cyan-600' },
+              { val: 50, label: 'TOP 50', color: 'from-cyan-500 to-emerald-600' }
+            ].map(limit => (
+              <button
+                key={limit.val}
+                onClick={() => setDisplayLimit(limit.val)}
+                className={`relative px-4 py-1.5 text-[10px] font-black tracking-widest rounded-lg transition-all duration-300 overflow-hidden group ${
+                  displayLimit === limit.val 
+                    ? `bg-gradient-to-r ${limit.color} text-white shadow-lg shadow-blue-500/20 scale-105` 
+                    : 'text-kx-text-muted hover:text-white hover:bg-white/5'
+                }`}
+              >
+                <span className="relative z-10">{limit.label}</span>
+                {displayLimit === limit.val && (
+                  <motion.div
+                    layoutId="active-limit"
+                    className="absolute inset-0 bg-white/20 backdrop-blur-sm"
+                    initial={false}
+                    transition={{ type: "spring", bounce: 0.2, duration: 0.6 }}
+                  />
+                )}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -220,6 +255,7 @@ export default function SignalsPage() {
             { label: 'Asset', value: filterAsset, setter: setFilterAsset, options: ['ALL', ...assetOptions] },
             { label: 'Status', value: filterStatus, setter: setFilterStatus, options: ['ALL', 'PENDING', 'APPROVED', 'BLOCKED', 'EXPIRED'] },
             { label: 'Side', value: filterSide, setter: setFilterSide, options: ['ALL', 'LONG', 'SHORT', 'HOLD'] },
+            { label: 'Quality', value: filterQuality, setter: setFilterQuality, options: ['ALL', 'HIGH_PROB', 'ELITE_ONLY'] },
           ].map(filter => (
             <select
               key={filter.label}
@@ -229,7 +265,11 @@ export default function SignalsPage() {
               style={{ width: 'auto', padding: '6px 28px 6px 10px', fontSize: '13px' }}
             >
               {filter.options.map(opt => (
-                <option key={opt} value={opt}>{opt === 'ALL' ? `All ${filter.label}s` : opt}</option>
+                <option key={opt} value={opt}>
+                  {opt === 'ALL' ? `All ${filter.label}s` : 
+                   opt === 'HIGH_PROB' ? 'High Prob (>70%)' :
+                   opt === 'ELITE_ONLY' ? 'Elite (>85%)' : opt}
+                </option>
               ))}
             </select>
           ))}
