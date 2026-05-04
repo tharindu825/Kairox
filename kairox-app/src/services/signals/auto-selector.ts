@@ -71,8 +71,10 @@ function scoreCandidate(candle: NormalizedCandle, trendStrength: number, macdStr
   const momentum = Math.abs((candle.close - candle.open) / Math.max(candle.open, 1));
   // Volume: normalize to a 0-1 range using log scale, capped so majors don't dominate
   const logVolume = Math.min(Math.log10(Math.max(candle.volume, 1)) / 10, 1);
-  // Score: momentum (70%), MACD alignment (25%), volume bonus (5%)
-  return (momentum * 100 * trendStrength) * 0.7 + (macdStrength * 10) * 0.25 + logVolume * 0.05;
+  // Normalize MACD relative to price so BTC ($60k MACD) doesn't dominate altcoins ($0.01 MACD)
+  const normalizedMacd = candle.close > 0 ? macdStrength / candle.close : 0;
+  // Score: momentum (65%), normalized MACD alignment (25%), volume bonus (10%)
+  return (momentum * 100 * trendStrength) * 0.65 + (normalizedMacd * 1000) * 0.25 + logVolume * 0.10;
 }
 
 function passesIndicatorFilters(
@@ -153,7 +155,23 @@ export async function selectBestSignalCandidate(
   
   if (candidates.length === 0) return [];
 
+  // Diversity: penalize symbols that already have recent signals (last 2 cycles)
+  const db = await getDb();
+  const intervalMs = Number(process.env.AUTO_SIGNAL_INTERVAL_SECONDS || 300) * 1000;
+  const recentCutoff = new Date(Date.now() - intervalMs * 2);
+  const recentSignals = await db.collection('signals')
+    .find({ createdAt: { $gte: recentCutoff } })
+    .project({ symbol: 1 })
+    .toArray();
+  const recentSymbols = new Set(recentSignals.map((s) => s.symbol));
+
+  // Apply diversity penalty: reduce score of recently-signaled assets by 70%
+  const diversified = candidates.map((c) => ({
+    ...c,
+    score: recentSymbols.has(c.symbol) ? c.score * 0.3 : c.score,
+  }));
+
   // Return the top N candidates sorted by score
-  return candidates.sort((a, b) => b.score - a.score).slice(0, limit);
+  return diversified.sort((a, b) => b.score - a.score).slice(0, limit);
 }
 
