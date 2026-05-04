@@ -353,6 +353,19 @@ export default function SignalsPage() {
                   )}
 
                   <p className="text-sm" style={{ color: 'var(--kx-text-secondary)' }}>{signal.reasoning}</p>
+
+                  {riskVerdict === 'BLOCKED' && signal.riskAssessment?.reasons?.length > 0 && (
+                    <div className="mt-3 p-3 rounded-md bg-red-500/10 border border-red-500/20">
+                      <span className="text-xs font-bold text-red-400 uppercase tracking-wider mb-1 block flex items-center gap-1">
+                        <AlertTriangle className="w-3.5 h-3.5" /> Blocked by Risk Engine
+                      </span>
+                      <ul className="list-disc pl-5 space-y-1 text-xs text-red-300/90 mt-2">
+                        {signal.riskAssessment.reasons.map((reason: string, idx: number) => (
+                          <li key={idx}>{reason}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
                 </div>
 
                 <div className="flex lg:flex-col items-center gap-4 lg:gap-3 shrink-0">

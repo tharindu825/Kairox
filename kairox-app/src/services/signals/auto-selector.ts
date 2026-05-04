@@ -91,14 +91,27 @@ function passesIndicatorFilters(
 ): boolean {
   if (!Number.isFinite(features.atr) || features.atr <= 0) return false;
 
-  const macdAligned = inferredSide === 'LONG' ? features.macd.histogram >= -0.0001 : features.macd.histogram <= 0.0001;
-  const rsiAligned =
-    inferredSide === 'LONG'
-      ? features.rsi >= 38 && features.rsi <= 78
-      : features.rsi >= 22 && features.rsi <= 62;
-  const emaAligned = inferredSide === 'LONG' ? close >= features.ema50 : close <= features.ema50;
+  // MACD must be clearly aligned (not just barely crossing zero)
+  const macdAligned = inferredSide === 'LONG'
+    ? features.macd.histogram > 0
+    : features.macd.histogram < 0;
 
-  return macdAligned && rsiAligned && emaAligned;
+  // Tighter RSI ranges to avoid overbought/oversold entries
+  const rsiAligned = inferredSide === 'LONG'
+    ? features.rsi >= 42 && features.rsi <= 68
+    : features.rsi >= 32 && features.rsi <= 58;
+
+  // Price must be above/below BOTH EMA20 and EMA50 for strong trend confirmation
+  const emaAligned = inferredSide === 'LONG'
+    ? close >= features.ema20 && close >= features.ema50
+    : close <= features.ema20 && close <= features.ema50;
+
+  // Require meaningful candle body relative to ATR (at least 30%)
+  // This filters out doji/indecision candles
+  const trend = features.trend;
+  const isStrongTrend = trend.startsWith('STRONG');
+
+  return macdAligned && rsiAligned && emaAligned && isStrongTrend;
 }
 
 async function evaluateSymbol(
@@ -150,8 +163,30 @@ export async function selectBestSignalCandidate(
   // Limit to first 200 for performance as requested
   const processingSymbols = sortedSymbols.slice(0, 200);
 
-  const evaluated = await Promise.all(processingSymbols.map((symbol) => evaluateSymbol(symbol, timeframe, sideFilter)));
-  const candidates = evaluated.filter((candidate): candidate is SignalSelectionResult => candidate !== null);
+  // Process in batches of 10 to avoid overwhelming Binance API with concurrent requests
+  const BATCH_SIZE = 10;
+  const candidates: SignalSelectionResult[] = [];
+
+  for (let i = 0; i < processingSymbols.length; i += BATCH_SIZE) {
+    const batch = processingSymbols.slice(i, i + BATCH_SIZE);
+    const results = await Promise.all(
+      batch.map(async (symbol) => {
+        try {
+          return await evaluateSymbol(symbol, timeframe, sideFilter);
+        } catch {
+          // Skip symbols that fail (timeout, invalid pair, etc.)
+          return null;
+        }
+      })
+    );
+    for (const r of results) {
+      if (r) candidates.push(r);
+    }
+    // Small delay between batches to respect rate limits
+    if (i + BATCH_SIZE < processingSymbols.length) {
+      await new Promise((r) => setTimeout(r, 500));
+    }
+  }
   
   if (candidates.length === 0) return [];
 
