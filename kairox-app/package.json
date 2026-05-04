@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "worker": "npx tsx src/worker-entry.ts"
+    "worker": "npx tsx src/worker-entry.ts",
+    "start:all": "concurrently -n dev,worker -c blue,green \"npm run dev\" \"npm run worker\""
   },
   "dependencies": {
     "@auth/mongodb-adapter": "^3.11.2",
@@ -41,6 +42,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@types/ws": "^8.18.1",
+    "concurrently": "^9.2.1",
     "eslint": "^9",
     "eslint-config-next": "16.2.4",
     "tailwindcss": "^4",
