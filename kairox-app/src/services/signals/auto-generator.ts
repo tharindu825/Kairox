@@ -35,19 +35,20 @@ export function startAutoSignalGeneration(): () => void {
         timeframe,
         sideFilter,
         assetQuery,
-      }, 1);
+      }, 3); // Generate up to 3 signals per cycle
 
       if (candidates.length === 0) {
         console.log('[Auto Signals] No candidate passed filters in this cycle.');
         return;
       }
 
-      const best = candidates[0];
-      await redis.set(`market:${best.symbol}:${timeframe}:latest`, JSON.stringify(best.candle));
-      await signalQueue.add('generate-signal', { candle: best.candle });
-      console.log(
-        `[Auto Signals] Queued ${best.symbol} (${timeframe}) | side=${best.inferredSide} | score=${best.score.toFixed(4)}`
-      );
+      for (const candidate of candidates) {
+        await redis.set(`market:${candidate.symbol}:${timeframe}:latest`, JSON.stringify(candidate.candle));
+        await signalQueue.add('generate-signal', { candle: candidate.candle });
+        console.log(
+          `[Auto Signals] Queued ${candidate.symbol} (${timeframe}) | side=${candidate.inferredSide} | score=${candidate.score.toFixed(4)}`
+        );
+      }
     } catch (error) {
       console.error('[Auto Signals] Cycle failed:', error);
     } finally {

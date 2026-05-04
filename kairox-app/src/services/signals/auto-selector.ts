@@ -67,9 +67,12 @@ export async function fetchRecentCandles(
 }
 
 function scoreCandidate(candle: NormalizedCandle, trendStrength: number, macdStrength: number): number {
+  // Momentum: percentage change of the candle body (primary driver of score)
   const momentum = Math.abs((candle.close - candle.open) / Math.max(candle.open, 1));
-  const logVolume = Math.log10(Math.max(candle.volume, 1));
-  return momentum * 100 * trendStrength + macdStrength * 10 + logVolume;
+  // Volume: normalize to a 0-1 range using log scale, capped so majors don't dominate
+  const logVolume = Math.min(Math.log10(Math.max(candle.volume, 1)) / 10, 1);
+  // Score: momentum (70%), MACD alignment (25%), volume bonus (5%)
+  return (momentum * 100 * trendStrength) * 0.7 + (macdStrength * 10) * 0.25 + logVolume * 0.05;
 }
 
 function passesIndicatorFilters(
@@ -139,16 +142,8 @@ export async function selectBestSignalCandidate(
 
   if (filteredSymbols.length === 0) return [];
 
-  // Sort symbols to prioritize major ones if no query is provided
-  const sortedSymbols = assetQuery ? filteredSymbols : [...filteredSymbols].sort((a, b) => {
-    const majors = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT'];
-    const aMajor = majors.indexOf(a);
-    const bMajor = majors.indexOf(b);
-    if (aMajor !== -1 && bMajor !== -1) return aMajor - bMajor;
-    if (aMajor !== -1) return -1;
-    if (bMajor !== -1) return 1;
-    return 0;
-  });
+  // Process in the order they were provided (or alphabetically) to ensure fairness
+  const sortedSymbols = assetQuery ? filteredSymbols : [...filteredSymbols].sort();
 
   // Limit to first 200 for performance as requested
   const processingSymbols = sortedSymbols.slice(0, 200);

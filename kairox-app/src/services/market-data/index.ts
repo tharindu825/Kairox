@@ -1,7 +1,6 @@
 import { getDb } from '@/lib/mongodb';
 import { redis } from '@/lib/redis';
 import { binanceWS, NormalizedCandle } from './binance';
-import { signalQueue } from '@/workers/queues';
 import { paperTradingService } from '../paper-trading';
 
 export class MarketDataService {
@@ -35,8 +34,9 @@ export class MarketDataService {
       
       try {
         await this.persistCandle(candle);
-        // Push an event to BullMQ to trigger feature engineering and AI signal generation
-        await signalQueue.add('generate-signal', { candle });
+        // NOTE: Signal generation is handled exclusively by the auto-generator service,
+        // which scans all 200 assets on a 4h interval. We no longer trigger signals
+        // from the WebSocket stream to avoid bias towards the few streamed symbols.
       } catch (error) {
         console.error('[Market Data] Failed to persist candle:', error);
       }
