@@ -5,7 +5,15 @@ if (!process.env.MONGODB_URI) {
 }
 
 const uri = process.env.MONGODB_URI;
-const options = {};
+const options: Record<string, unknown> = {};
+
+// If separate credentials are provided, use them (avoids URL-encoding issues)
+if (process.env.MONGODB_USER && process.env.MONGODB_PASS) {
+  options.auth = {
+    username: process.env.MONGODB_USER,
+    password: process.env.MONGODB_PASS,
+  };
+}
 
 let client: MongoClient;
 let clientPromise: Promise<MongoClient>;
