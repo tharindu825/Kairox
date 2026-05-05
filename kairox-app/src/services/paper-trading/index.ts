@@ -99,21 +99,30 @@ export class PaperTradingService {
   }
 
   /**
-   * Converts an approved signal into an active paper order.
+   * Converts an approved signal into an active paper order at the CURRENT market price.
    */
   async executeApprovedSignal(signalId: string, quantity: number) {
     const db = await getDb();
     const signal = await db.collection('signals').findOne({ _id: new ObjectId(signalId) });
     
     if (!signal) return;
-    
     if (signal.status !== 'APPROVED') return;
+
+    // Fetch the actual current market price to prevent instant phantom P&L
+    const { marketDataService } = await import('../market-data');
+    const currentPriceRaw = await marketDataService.getLatestPrice(signal.symbol);
+    
+    const actualEntryPrice = currentPriceRaw || signal.entry;
+
+    if (!currentPriceRaw) {
+      console.warn(`[Paper Trade] Could not fetch real-time price for ${signal.symbol}, falling back to AI entry price: ${signal.entry}`);
+    }
 
     const orderData = {
       signalId: signalId,
       symbol: signal.symbol,
       side: signal.side,
-      entryPrice: signal.entry,
+      entryPrice: actualEntryPrice,
       stopLoss: signal.stopLoss,
       quantity: quantity,
       status: 'OPEN',
@@ -122,7 +131,7 @@ export class PaperTradingService {
     
     const result = await db.collection('paperOrders').insertOne(orderData);
 
-    console.log(`[Paper Trade] Executed paper order ${result.insertedId} for ${signalId}`);
+    console.log(`[Paper Trade] Executed paper order ${result.insertedId} for ${signalId} at market price $${actualEntryPrice}`);
     return { id: result.insertedId.toString(), ...orderData };
   }
 
