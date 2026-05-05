@@ -21,11 +21,11 @@ export interface RiskPolicy {
 
 const DEFAULT_POLICY: RiskPolicy = {
   maxRiskPercent: 2.0,
-  maxOpenTrades: 5,
+  maxOpenTrades: 10,
   maxCorrelated: 3,
-  minRewardRisk: 1.5,
-  dailyDrawdownLimit: 5.0,
-  cooldownMinutes: 60,
+  minRewardRisk: 1.2,
+  dailyDrawdownLimit: 10.0,
+  cooldownMinutes: 30,
 };
 
 export class RiskEngine {
@@ -115,10 +115,10 @@ export class RiskEngine {
     }
 
     // ─── 8. Confidence Check ────────────────────────────────────────────
-    if (signal.confidence < 0.5) {
+    if (signal.confidence < 0.40) {
       reasons.push(`Low confidence: ${(signal.confidence * 100).toFixed(0)}%`);
       verdict = this.escalateVerdict(verdict, 'WATCH_ONLY');
-    } else if (signal.confidence < 0.65) {
+    } else if (signal.confidence < 0.50) {
       reasons.push(`Moderate confidence: ${(signal.confidence * 100).toFixed(0)}% — reduced size recommended`);
       if (verdict === 'APPROVED') verdict = 'REDUCED';
     }
