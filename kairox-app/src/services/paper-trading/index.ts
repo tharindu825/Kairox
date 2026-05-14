@@ -12,16 +12,16 @@ export class PaperTradingService {
   async processLiveTick(candle: NormalizedCandle) {
     const db = await getDb();
     
-    const openOrders = await db.collection('paperOrders')
+    const activeOrders = await db.collection('paperOrders')
       .find({ 
         symbol: candle.symbol,
-        status: 'OPEN'
+        status: { $in: ['OPEN', 'PENDING'] }
       })
       .toArray();
       
-    if (openOrders.length === 0) return;
+    if (activeOrders.length === 0) return;
     
-    const ordersWithSignals = await Promise.all(openOrders.map(async (order) => {
+    const ordersWithSignals = await Promise.all(activeOrders.map(async (order) => {
        let signal = null;
        if (order.signalId) {
           signal = await db.collection('signals').findOne({ _id: new ObjectId(order.signalId) });
@@ -30,6 +30,26 @@ export class PaperTradingService {
     }));
 
     for (const order of ordersWithSignals) {
+      if (order.status === 'PENDING') {
+         const entryPrice = new Decimal(order.entryPrice);
+         const lowPrice = new Decimal(candle.low);
+         const highPrice = new Decimal(candle.high);
+
+         if (entryPrice.greaterThanOrEqualTo(lowPrice) && entryPrice.lessThanOrEqualTo(highPrice)) {
+            await db.collection('paperOrders').updateOne(
+              { _id: new ObjectId(order.id) },
+              { $set: { status: 'OPEN', openedAt: new Date() } }
+            );
+            console.log(`[Paper Trade] Order ${order.id} activated at entry price ${entryPrice.toString()}`);
+            
+            await alertQueue.add('send-telegram', {
+              signalId: order.signalId,
+              message: `🚀 PAPER TRADE OPENED: ${candle.symbol}\n\nSide: ${order.side}\nEntry Price: ${entryPrice.toString()}\nSize: ${order.quantity}`
+            });
+         }
+         continue;
+      }
+
       const currentPrice = new Decimal(candle.close);
       const stopLoss = new Decimal(order.stopLoss);
       let exitReason: 'STOP_LOSS' | 'TAKE_PROFIT' | null = null;
@@ -99,7 +119,7 @@ export class PaperTradingService {
   }
 
   /**
-   * Converts an approved signal into an active paper order at the CURRENT market price.
+   * Converts an approved signal into a PENDING paper order at the exact entry price.
    */
   async executeApprovedSignal(signalId: string, quantity: number) {
     const db = await getDb();
@@ -108,30 +128,20 @@ export class PaperTradingService {
     if (!signal) return;
     if (signal.status !== 'APPROVED') return;
 
-    // Fetch the actual current market price to prevent instant phantom P&L
-    const { marketDataService } = await import('../market-data');
-    const currentPriceRaw = await marketDataService.getLatestPrice(signal.symbol);
-    
-    const actualEntryPrice = currentPriceRaw || signal.entry;
-
-    if (!currentPriceRaw) {
-      console.warn(`[Paper Trade] Could not fetch real-time price for ${signal.symbol}, falling back to AI entry price: ${signal.entry}`);
-    }
-
     const orderData = {
       signalId: signalId,
       symbol: signal.symbol,
       side: signal.side,
-      entryPrice: actualEntryPrice,
+      entryPrice: signal.entry,
       stopLoss: signal.stopLoss,
       quantity: quantity,
-      status: 'OPEN',
+      status: 'PENDING',
       openedAt: new Date(),
     };
     
     const result = await db.collection('paperOrders').insertOne(orderData);
 
-    console.log(`[Paper Trade] Executed paper order ${result.insertedId} for ${signalId} at market price $${actualEntryPrice}`);
+    console.log(`[Paper Trade] Executed paper order ${result.insertedId} for ${signalId} as PENDING at entry price $${signal.entry}`);
     return { id: result.insertedId.toString(), ...orderData };
   }
 

@@ -64,7 +64,7 @@ async function getPortfolioState(): Promise<PortfolioState> {
 
   // Correlated assets
   const correlatedAssets = ordersWithSignals
-    .map(o => o.signal?.symbol)
+    .map(o => (o.signal as any)?.symbol)
     .filter((symbol): symbol is string => typeof symbol === 'string');
 
   // Consecutive stop-outs
@@ -258,24 +258,24 @@ export const signalWorker = new Worker(
 
       await Logger.success(`Signal created: ${signalRecord.id} (${candle.symbol} - ${riskAssessment.verdict})`, 'Signal Worker');
 
-      // 7. Auto-execute Paper Trade if Approved
-      if (signalStatus === 'APPROVED' && riskAssessment.positionSize > 0) {
+      // 7. Auto-execute Paper Trade if Approved and Agreed
+      if (signalStatus === 'APPROVED' && isAgreement && riskAssessment.positionSize > 0) {
         try {
           await paperTradingService.executeApprovedSignal(
             signalRecord.id,
             riskAssessment.positionSize
           );
-          await Logger.info(`Paper trade opened for signal ${signalRecord.id}`, 'Signal Worker');
+          await Logger.info(`Paper trade prepared for signal ${signalRecord.id}`, 'Signal Worker');
         } catch (err) {
           await Logger.error(`Failed to open paper trade: ${(err as Error).message}`, 'Signal Worker');
         }
       }
 
-      // 8. Dispatch Alert if Approved
-      if (signalStatus === 'APPROVED') {
+      // 8. Dispatch Alert if Approved and Agreed
+      if (signalStatus === 'APPROVED' && isAgreement) {
         await alertQueue.add('send-telegram', {
           signalId: signalRecord.id,
-          message: `🚨 NEW APPROVED SIGNAL 🚨\n\nAsset: ${candle.symbol}\nSide: ${primarySignal.side}\nConfidence: ${(primarySignal.confidence * 100).toFixed(0)}%\nEntry: ${primarySignal.entry}\nStop: ${primarySignal.stopLoss}\nTarget: ${primarySignal.targets[0]?.price}\nR:R: ${riskAssessment.rewardToRisk.toFixed(2)}\nSize: ${riskAssessment.positionSize.toFixed(4)} units\n\nModels: ${isAgreement ? '✅ Agree' : '⚠️ Disagree'}`
+          message: `🚨 NEW APPROVED SIGNAL 🚨\n\nAsset: ${candle.symbol}\nSide: ${primarySignal.side}\nConfidence: ${(primarySignal.confidence * 100).toFixed(0)}%\nEntry: ${primarySignal.entry}\nStop: ${primarySignal.stopLoss}\nTarget: ${primarySignal.targets[0]?.price}\nR:R: ${riskAssessment.rewardToRisk.toFixed(2)}\nSize: ${riskAssessment.positionSize.toFixed(4)} units\n\nModels: ✅ Agree`
         });
       }
 
