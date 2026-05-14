@@ -164,7 +164,15 @@ RULES:
 5. Targets must have a minimum reward-to-risk ratio of 1.5:1.
 6. Invalidation describes what would make this signal wrong.
 7. Be specific about key factors — reference actual indicator values.
-8. You are acting as an INDEPENDENT confirmation model. Form your own view.`;
+8. You are acting as an INDEPENDENT confirmation model. Form your own view.
+
+PRICE PRECISION RULES (CRITICAL):
+- Entry, Stop Loss, and Target prices MUST use proper decimal precision.
+- For coins priced above $100: use 2 decimal places (e.g., 65432.10).
+- For coins priced $1-$100: use 3-4 decimal places (e.g., 1.2345).
+- For coins priced $0.01-$1: use 4-5 decimal places (e.g., 0.08523).
+- For coins priced below $0.01: use 5-6 decimal places (e.g., 0.008523).
+- NEVER round entry, stopLoss, or targets to the same value. They MUST be meaningfully different.`;
     }
 
     return `You are a professional quantitative trading analyst. You analyze technical indicators, market structure, and price action to generate structured trading signals.
@@ -178,27 +186,45 @@ RULES:
 6. Do NOT emit a trade if risk-reward is below 1.5:1.
 7. Invalidation describes what would make this signal wrong.
 8. Be specific about key factors — reference actual indicator values.
-9. Never guess or fabricate data. Use only the provided indicators.`;
+9. Never guess or fabricate data. Use only the provided indicators.
+
+PRICE PRECISION RULES (CRITICAL):
+- Entry, Stop Loss, and Target prices MUST use proper decimal precision.
+- For coins priced above $100: use 2 decimal places (e.g., 65432.10).
+- For coins priced $1-$100: use 3-4 decimal places (e.g., 1.2345).
+- For coins priced $0.01-$1: use 4-5 decimal places (e.g., 0.08523).
+- For coins priced below $0.01: use 5-6 decimal places (e.g., 0.008523).
+- NEVER round entry, stopLoss, or targets to the same value. They MUST be meaningfully different.
+- The distance between entry and stopLoss must be at least 1x ATR.
+- The distance between entry and first target must be at least 1.5x the stopLoss distance.`;
   }
 
   private buildUserPrompt(symbol: string, timeframe: string, features: FeatureBundle): string {
+    // Determine appropriate decimal precision based on price level
+    const price = features.ema20; // Use EMA20 as proxy for current price
+    const pricePrecision = price >= 100 ? 2 : price >= 1 ? 4 : price >= 0.01 ? 5 : 6;
+    const formatPrice = (p: number) => p.toFixed(pricePrecision);
+
     return `Analyze the following market data and generate a trading signal:
 
 ASSET: ${symbol}
 TIMEFRAME: ${timeframe}
+CURRENT PRICE: ${formatPrice(price)}
 
 TECHNICAL INDICATORS:
 - RSI(14): ${features.rsi.toFixed(2)}
-- MACD: ${features.macd.macd.toFixed(4)} | Signal: ${features.macd.signal.toFixed(4)} | Histogram: ${features.macd.histogram.toFixed(4)}
-- ATR(14): ${features.atr.toFixed(4)}
-- EMA(20): ${features.ema20.toFixed(2)}
-- EMA(50): ${features.ema50.toFixed(2)}
-- EMA(200): ${features.ema200.toFixed(2)}
-- Bollinger Bands: Upper ${features.bb.upper.toFixed(2)} | Middle ${features.bb.middle.toFixed(2)} | Lower ${features.bb.lower.toFixed(2)}
+- MACD: ${features.macd.macd.toFixed(6)} | Signal: ${features.macd.signal.toFixed(6)} | Histogram: ${features.macd.histogram.toFixed(6)}
+- ATR(14): ${features.atr.toFixed(6)}
+- EMA(20): ${formatPrice(features.ema20)}
+- EMA(50): ${formatPrice(features.ema50)}
+- EMA(200): ${formatPrice(features.ema200)}
+- Bollinger Bands: Upper ${formatPrice(features.bb.upper)} | Middle ${formatPrice(features.bb.middle)} | Lower ${formatPrice(features.bb.lower)}
 
 MARKET CONTEXT:
 - Trend: ${features.trend}
 - Volume Profile: ${features.volumeProfile}
+
+IMPORTANT: Use ${pricePrecision} decimal places for entry, stopLoss, and target prices. Entry, stopLoss, and targets MUST be different values — never round them to the same number.
 
 Generate a trading signal as a JSON object.`;
   }

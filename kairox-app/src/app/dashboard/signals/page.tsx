@@ -48,6 +48,15 @@ function timeAgo(date: any): string {
   return `${hours}h ago`;
 }
 
+function formatSignalPrice(price: number): string {
+  const p = Number(price);
+  if (!Number.isFinite(p)) return '0';
+  if (p >= 100) return p.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  if (p >= 1) return p.toFixed(4);
+  if (p >= 0.01) return p.toFixed(5);
+  return p.toFixed(6);
+}
+
 export default function SignalsPage() {
   const defaultSymbols = ['BTCUSDT', 'ETHUSDT', 'ADAUSDT', 'SOLUSDT', 'XRPUSDT', 'BNBUSDT'];
   const [filterAsset, setFilterAsset] = useState('ALL');
@@ -344,10 +353,10 @@ export default function SignalsPage() {
 
                   {signal.side !== 'HOLD' && (
                     <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm mb-3">
-                      <span style={{ color: 'var(--kx-text-muted)' }}>Entry: <span className="font-mono font-medium" style={{ color: 'var(--kx-text-primary)' }}>${Number(signal.entry).toLocaleString()}</span></span>
-                      <span style={{ color: 'var(--kx-text-muted)' }}>Stop: <span className="font-mono font-medium" style={{ color: 'var(--kx-short)' }}>${Number(signal.stopLoss).toLocaleString()}</span></span>
+                      <span style={{ color: 'var(--kx-text-muted)' }}>Entry: <span className="font-mono font-medium" style={{ color: 'var(--kx-text-primary)' }}>${formatSignalPrice(signal.entry)}</span></span>
+                      <span style={{ color: 'var(--kx-text-muted)' }}>Stop: <span className="font-mono font-medium" style={{ color: 'var(--kx-short)' }}>${formatSignalPrice(signal.stopLoss)}</span></span>
                       {signal.targets?.map((t: any) => (
-                        <span key={t.label} style={{ color: 'var(--kx-text-muted)' }}>{t.label}: <span className="font-mono font-medium" style={{ color: 'var(--kx-long)' }}>${Number(t.price).toLocaleString()}</span></span>
+                        <span key={t.label} style={{ color: 'var(--kx-text-muted)' }}>{t.label}: <span className="font-mono font-medium" style={{ color: 'var(--kx-long)' }}>${formatSignalPrice(t.price)}</span></span>
                       ))}
                     </div>
                   )}

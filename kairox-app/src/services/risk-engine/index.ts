@@ -23,7 +23,7 @@ const DEFAULT_POLICY: RiskPolicy = {
   maxRiskPercent: 2.0,
   maxOpenTrades: 10,
   maxCorrelated: 3,
-  minRewardRisk: 1.2,
+  minRewardRisk: 1.0,
   dailyDrawdownLimit: 10.0,
   cooldownMinutes: 30,
 };
@@ -66,6 +66,9 @@ export class RiskEngine {
     if (rewardToRisk < this.policy.minRewardRisk) {
       reasons.push(`R:R ratio ${rewardToRisk.toFixed(2)} below minimum ${this.policy.minRewardRisk}`);
       verdict = 'BLOCKED';
+    } else if (rewardToRisk < 1.5) {
+      reasons.push(`R:R ratio ${rewardToRisk.toFixed(2)} is marginal (below 1.5) — reduced position size`);
+      verdict = this.escalateVerdict(verdict, 'REDUCED');
     }
 
     // ─── 2. Position Sizing (% risk model) ──────────────────────────────

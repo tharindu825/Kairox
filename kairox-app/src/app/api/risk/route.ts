@@ -124,7 +124,7 @@ export async function GET() {
     }));
 
     // ─── Open Positions for Paper Trades Table ──────────────────────────
-    const openPositions = openOrders.map(order => ({
+    const openPositions = openOrders.map((order: any) => ({
       id: order.id,
       symbol: order.symbol || order.signal?.asset?.symbol || 'Unknown',
       side: order.side,

@@ -18,7 +18,15 @@ export interface SignalSelectionResult {
   inferredSide: 'LONG' | 'SHORT';
 }
 
-const DEFAULT_SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'ADAUSDT', 'SOLUSDT', 'XRPUSDT', 'BNBUSDT'];
+const DEFAULT_SYMBOLS = [
+  // Top 30 Binance USDT pairs by trading volume
+  'BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT',
+  'DOGEUSDT', 'ADAUSDT', 'AVAXUSDT', 'TRXUSDT', 'DOTUSDT',
+  'LINKUSDT', 'MATICUSDT', 'SHIBUSDT', 'LTCUSDT', 'BCHUSDT',
+  'UNIUSDT', 'APTUSDT', 'NEARUSDT', 'ICPUSDT', 'SUIUSDT',
+  'PEPEUSDT', 'WIFUSDT', 'FETUSDT', 'RENDERUSDT', 'INJUSDT',
+  'ARBUSDT', 'OPUSDT', 'FILUSDT', 'AAVEUSDT', 'ATOMUSDT',
+];
 
 function normalizeSymbols(symbols: string[]): string[] {
   return Array.from(new Set(symbols.map((symbol) => String(symbol).toUpperCase()).filter(Boolean)));
@@ -91,27 +99,26 @@ function passesIndicatorFilters(
 ): boolean {
   if (!Number.isFinite(features.atr) || features.atr <= 0) return false;
 
-  // MACD must be clearly aligned (not just barely crossing zero)
+  // MACD must be aligned with direction
   const macdAligned = inferredSide === 'LONG'
     ? features.macd.histogram > 0
     : features.macd.histogram < 0;
 
-  // Tighter RSI ranges to avoid overbought/oversold entries
+  // Wider RSI ranges to allow more setups through
   const rsiAligned = inferredSide === 'LONG'
-    ? features.rsi >= 42 && features.rsi <= 68
-    : features.rsi >= 32 && features.rsi <= 58;
+    ? features.rsi >= 35 && features.rsi <= 72
+    : features.rsi >= 28 && features.rsi <= 65;
 
-  // Price must be above/below BOTH EMA20 and EMA50 for strong trend confirmation
+  // Require at least ONE EMA alignment (relaxed from both)
   const emaAligned = inferredSide === 'LONG'
-    ? close >= features.ema20 && close >= features.ema50
-    : close <= features.ema20 && close <= features.ema50;
+    ? close >= features.ema20 || close >= features.ema50
+    : close <= features.ema20 || close <= features.ema50;
 
-  // Require meaningful candle body relative to ATR (at least 30%)
-  // This filters out doji/indecision candles
+  // Allow both STRONG and regular BULL/BEAR trends
   const trend = features.trend;
-  const isStrongTrend = trend.startsWith('STRONG');
+  const isTrending = trend.includes('BULL') || trend.includes('BEAR');
 
-  return macdAligned && rsiAligned && emaAligned && isStrongTrend;
+  return macdAligned && rsiAligned && emaAligned && isTrending;
 }
 
 async function evaluateSymbol(

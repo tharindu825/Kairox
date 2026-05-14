@@ -184,31 +184,49 @@ CRITICAL TRADING RULES:
 1. TREND ALIGNMENT: Only suggest LONG if Price > EMA200. Only suggest SHORT if Price < EMA200.
 2. OVEREXTENDED MARKETS: Do NOT suggest LONG if RSI > 65. Do NOT suggest SHORT if RSI < 35.
 3. MOMENTUM: MACD histogram must be increasing for LONGs and decreasing for SHORTs.
-4. CONSERVATIVE R:R: Minimum 2:1 Reward-to-Risk ratio is REQUIRED. 
+4. CONSERVATIVE R:R: Minimum 1.5:1 Reward-to-Risk ratio is REQUIRED. 
 5. HOLD BIAS: When in doubt, or if market is sideways, ALWAYS return "HOLD". We value capital preservation over trade quantity.
 6. ACCURACY: Accuracy is your primary metric. A signal with < 0.7 confidence should be a "HOLD".
 7. STOP LOSS: Use ATR-based stops (1.5x to 2x ATR) to avoid being stopped out by noise.
-8. RESPOND ONLY WITH JSON matching the schema precisely.`;
+8. RESPOND ONLY WITH JSON matching the schema precisely.
+
+PRICE PRECISION RULES (CRITICAL):
+- Entry, Stop Loss, and Target prices MUST use proper decimal precision.
+- For coins priced above $100: use 2 decimal places (e.g., 65432.10).
+- For coins priced $1-$100: use 3-4 decimal places (e.g., 1.2345).
+- For coins priced $0.01-$1: use 4-5 decimal places (e.g., 0.08523).
+- For coins priced below $0.01: use 5-6 decimal places (e.g., 0.008523).
+- NEVER round entry, stopLoss, or targets to the same value. They MUST be meaningfully different.
+- The distance between entry and stopLoss must be at least 1x ATR.
+- The distance between entry and first target must be at least 1.5x the stopLoss distance.`;
   }
 
   private buildUserPrompt(symbol: string, timeframe: string, features: FeatureBundle): string {
+    // Determine appropriate decimal precision based on price level
+    const price = features.ema20; // Use EMA20 as proxy for current price
+    const pricePrecision = price >= 100 ? 2 : price >= 1 ? 4 : price >= 0.01 ? 5 : 6;
+    const formatPrice = (p: number) => p.toFixed(pricePrecision);
+
     return `Analyze the following market data and generate a trading signal:
 
 ASSET: ${symbol}
 TIMEFRAME: ${timeframe}
+CURRENT PRICE: ${formatPrice(price)}
 
 TECHNICAL INDICATORS:
 - RSI(14): ${features.rsi.toFixed(2)}
-- MACD: ${features.macd.macd.toFixed(4)} | Signal: ${features.macd.signal.toFixed(4)} | Histogram: ${features.macd.histogram.toFixed(4)}
-- ATR(14): ${features.atr.toFixed(4)}
-- EMA(20): ${features.ema20.toFixed(2)}
-- EMA(50): ${features.ema50.toFixed(2)}
-- EMA(200): ${features.ema200.toFixed(2)}
-- Bollinger Bands: Upper ${features.bb.upper.toFixed(2)} | Middle ${features.bb.middle.toFixed(2)} | Lower ${features.bb.lower.toFixed(2)}
+- MACD: ${features.macd.macd.toFixed(6)} | Signal: ${features.macd.signal.toFixed(6)} | Histogram: ${features.macd.histogram.toFixed(6)}
+- ATR(14): ${features.atr.toFixed(6)}
+- EMA(20): ${formatPrice(features.ema20)}
+- EMA(50): ${formatPrice(features.ema50)}
+- EMA(200): ${formatPrice(features.ema200)}
+- Bollinger Bands: Upper ${formatPrice(features.bb.upper)} | Middle ${formatPrice(features.bb.middle)} | Lower ${formatPrice(features.bb.lower)}
 
 MARKET CONTEXT:
 - Trend: ${features.trend}
 - Volume Profile: ${features.volumeProfile}
+
+IMPORTANT: Use ${pricePrecision} decimal places for entry, stopLoss, and target prices. Entry, stopLoss, and targets MUST be different values — never round them to the same number.
 
 Generate a trading signal as a JSON object.`;
   }

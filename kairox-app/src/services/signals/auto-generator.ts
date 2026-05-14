@@ -35,7 +35,7 @@ export function startAutoSignalGeneration(): () => void {
         timeframe,
         sideFilter,
         assetQuery,
-      }, 3); // Generate up to 3 signals per cycle
+      }, 5); // Generate up to 5 signals per cycle
 
       if (candidates.length === 0) {
         console.log('[Auto Signals] No candidate passed filters in this cycle.');
