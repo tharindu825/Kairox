@@ -31,6 +31,33 @@ export class PaperTradingService {
 
     for (const order of ordersWithSignals) {
       if (order.status === 'PENDING') {
+         const now = new Date();
+         const orderTime = new Date(order.openedAt || now);
+         const expirationMs = 24 * 60 * 60 * 1000; // 24 hours
+         
+         if (now.getTime() - orderTime.getTime() > expirationMs) {
+            await db.collection('paperOrders').updateOne(
+              { _id: new ObjectId(order.id) },
+              { $set: { status: 'EXPIRED', closedAt: now, exitReason: 'TIMEOUT' } }
+            );
+            
+            if (order.signalId) {
+               await db.collection('signals').updateOne(
+                 { _id: new ObjectId(order.signalId) },
+                 { $set: { status: 'EXPIRED', updatedAt: now } }
+               );
+            }
+            
+            console.log(`[Paper Trade] Order ${order.id} expired without reaching entry price.`);
+            
+            await alertQueue.add('send-telegram', {
+              signalId: order.signalId,
+              message: `⏰ SIGNAL EXPIRED: ${candle.symbol}\n\nSide: ${order.side}\nReason: Entry price not reached within 24 hours.`
+            });
+            
+            continue;
+         }
+
          const entryPrice = new Decimal(order.entryPrice);
          const lowPrice = new Decimal(candle.low);
          const highPrice = new Decimal(candle.high);
