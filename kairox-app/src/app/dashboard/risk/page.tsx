@@ -209,6 +209,30 @@ export default function RiskPage() {
                                 Close
                               </button>
                             )}
+                            {order.status === 'PENDING' && (
+                              <button
+                                onClick={async () => {
+                                  if (!window.confirm(`Cancel ${order.symbol} ${order.side} pending order?`)) return;
+                                  try {
+                                    const res = await fetch(`/api/paper-trades/${order.id}/cancel`, { method: 'POST' });
+                                    if (res.ok) {
+                                      mutatePaper();
+                                      mutateRisk();
+                                    } else {
+                                      const err = await res.json();
+                                      alert(`Failed to cancel trade: ${err.error}`);
+                                    }
+                                  } catch (err) {
+                                    console.error(err);
+                                    alert('Error canceling trade');
+                                  }
+                                }}
+                                className="text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded transition-colors"
+                                style={{ background: 'rgba(255,71,87,0.1)', color: 'var(--kx-short)' }}
+                              >
+                                Cancel
+                              </button>
+                            )}
                           </div>
                         </td>
                       </tr>
