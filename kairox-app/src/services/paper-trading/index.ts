@@ -33,7 +33,7 @@ export class PaperTradingService {
       if (order.status === 'PENDING') {
          const now = new Date();
          const orderTime = new Date(order.openedAt || now);
-         const expirationMs = 4 * 60 * 60 * 1000; // 4 hours
+         const expirationMs = 8 * 60 * 60 * 1000; // 8 hours
          
          if (now.getTime() - orderTime.getTime() > expirationMs) {
             await db.collection('paperOrders').updateOne(
@@ -52,7 +52,7 @@ export class PaperTradingService {
             
             await alertQueue.add('send-telegram', {
               signalId: order.signalId,
-              message: `⏰ SIGNAL EXPIRED: ${candle.symbol}\n\nSide: ${order.side}\nReason: Entry price not reached within 4 hours.`
+              message: `⏰ SIGNAL EXPIRED: ${candle.symbol}\n\nSide: ${order.side}\n\nThis Signal is expired (Entry price not reached within 8 hours).`
             });
             
             continue;
