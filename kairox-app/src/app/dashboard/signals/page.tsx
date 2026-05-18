@@ -65,6 +65,7 @@ export default function SignalsPage() {
   const [filterQuality, setFilterQuality] = useState('ALL');
   const [searchQuery, setSearchQuery] = useState('');
   const [displayLimit, setDisplayLimit] = useState(10);
+  const [generateSymbol, setGenerateSymbol] = useState('AUTO');
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSyncingAssets, setIsSyncingAssets] = useState(false);
   const [isLogsOpen, setIsLogsOpen] = useState(false);
@@ -113,8 +114,8 @@ export default function SignalsPage() {
   };
 
   const triggerSignalGeneration = async () => {
-    const autoSelect = filterAsset === 'ALL';
-    const symbol = autoSelect ? undefined : filterAsset;
+    const autoSelect = generateSymbol === 'AUTO';
+    const symbol = autoSelect ? undefined : generateSymbol;
     setIsGenerating(true);
     setActionMessage('');
     try {
@@ -123,10 +124,9 @@ export default function SignalsPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           symbol,
-          timeframe: '1h',
+          timeframe: '4h', // Standardized to 4h
           autoSelect,
-          sideFilter: filterSide,
-          assetQuery: searchQuery.trim(),
+          sideFilter: 'ALL',
         }),
       });
       const data = await res.json();
@@ -240,6 +240,37 @@ export default function SignalsPage() {
         </div>
       </div>
 
+      {/* Manual Generation Bar */}
+      <div className="kx-card p-4">
+        <div className="flex flex-wrap items-center gap-4">
+          <div className="flex items-center gap-2" style={{ color: 'var(--kx-accent)' }}>
+            <Zap className="w-4 h-4" />
+            <span className="text-sm font-medium">On-Demand Generation:</span>
+          </div>
+          <select
+            value={generateSymbol}
+            onChange={e => setGenerateSymbol(e.target.value)}
+            className="kx-input font-mono"
+            style={{ width: 'auto', padding: '6px 28px 6px 10px', fontSize: '13px' }}
+          >
+            <option value="AUTO">🤖 Auto-Select Best Candidates</option>
+            {assetOptions.filter(a => a !== 'ALL').map(opt => (
+              <option key={opt} value={opt}>{opt}</option>
+            ))}
+          </select>
+          
+          <button
+            onClick={triggerSignalGeneration}
+            disabled={isGenerating}
+            className="kx-btn kx-btn-primary px-4 py-2 text-xs font-bold uppercase tracking-wider flex items-center gap-2"
+            style={{ opacity: isGenerating ? 0.7 : 1 }}
+          >
+            {isGenerating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5" />}
+            {generateSymbol === 'AUTO' ? 'Run Auto-Selector' : `Generate 4H Signal`}
+          </button>
+        </div>
+      </div>
+
       {/* Filters bar */}
       <div className="kx-card p-4">
         <div className="flex flex-wrap items-center gap-3">
@@ -294,15 +325,6 @@ export default function SignalsPage() {
           >
             {isSyncingAssets ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
             Sync Assets
-          </button>
-          <button
-            onClick={triggerSignalGeneration}
-            disabled={isGenerating}
-            className="kx-btn kx-btn-primary px-3 py-2 text-xs font-medium flex items-center gap-1.5"
-            style={{ opacity: isGenerating ? 0.7 : 1 }}
-          >
-            {isGenerating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5" />}
-            Generate Signal
           </button>
         </div>
       </div>
