@@ -188,7 +188,8 @@ CRITICAL TRADING RULES:
 5. HOLD BIAS: When in doubt, or if market is sideways, ALWAYS return "HOLD". We value capital preservation over trade quantity.
 6. ACCURACY: Accuracy is your primary metric. A signal with < 0.7 confidence should be a "HOLD".
 7. STOP LOSS: Use ATR-based stops (1.5x to 2x ATR) to avoid being stopped out by noise.
-8. RESPOND ONLY WITH JSON matching the schema precisely.
+8. ACTIONABLE ENTRY: Your recommended entry price MUST be very close to the CURRENT PRICE. Do not suggest deep pullback entries that are unlikely to trigger.
+9. RESPOND ONLY WITH JSON matching the schema precisely.
 
 PRICE PRECISION RULES (CRITICAL):
 - Entry, Stop Loss, and Target prices MUST use proper decimal precision.
@@ -203,7 +204,7 @@ PRICE PRECISION RULES (CRITICAL):
 
   private buildUserPrompt(symbol: string, timeframe: string, features: FeatureBundle): string {
     // Determine appropriate decimal precision based on price level
-    const price = features.ema20; // Use EMA20 as proxy for current price
+    const price = features.closePrice; // Use actual current close price
     const pricePrecision = price >= 100 ? 2 : price >= 1 ? 4 : price >= 0.01 ? 5 : 6;
     const formatPrice = (p: number) => p.toFixed(pricePrecision);
 

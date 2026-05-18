@@ -11,6 +11,7 @@ export interface FeatureBundle {
   bb: { lower: number; middle: number; upper: number };
   volumeProfile: string;
   trend: 'STRONG_BULL' | 'BULL' | 'NEUTRAL' | 'BEAR' | 'STRONG_BEAR';
+  closePrice: number;
 }
 
 interface SymbolState {
@@ -120,6 +121,7 @@ export class IndicatorService {
       bb: bbVal,
       volumeProfile: this.analyzeVolume(currentCandle),
       trend: this.calculateTrend(currentCandle.close, Number(ema20Val), Number(ema50Val), Number(ema200Val)),
+      closePrice: currentCandle.close,
     };
   }
 

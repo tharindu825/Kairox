@@ -186,7 +186,8 @@ RULES:
 6. Do NOT emit a trade if risk-reward is below 1.5:1.
 7. Invalidation describes what would make this signal wrong.
 8. Be specific about key factors — reference actual indicator values.
-9. Never guess or fabricate data. Use only the provided indicators.
+9. ACTIONABLE ENTRY: Your recommended entry price MUST be very close to the CURRENT PRICE. Do not suggest deep pullback entries that are unlikely to trigger.
+10. Never guess or fabricate data. Use only the provided indicators.
 
 PRICE PRECISION RULES (CRITICAL):
 - Entry, Stop Loss, and Target prices MUST use proper decimal precision.
@@ -201,7 +202,7 @@ PRICE PRECISION RULES (CRITICAL):
 
   private buildUserPrompt(symbol: string, timeframe: string, features: FeatureBundle): string {
     // Determine appropriate decimal precision based on price level
-    const price = features.ema20; // Use EMA20 as proxy for current price
+    const price = features.closePrice; // Use actual current close price
     const pricePrecision = price >= 100 ? 2 : price >= 1 ? 4 : price >= 0.01 ? 5 : 6;
     const formatPrice = (p: number) => p.toFixed(pricePrecision);
 
