@@ -1,6 +1,7 @@
 import { redis } from '@/lib/redis';
 import { signalQueue } from '@/workers/queues';
-import { selectBestSignalCandidate, type SideFilter } from './auto-selector';
+import { selectBestSignalCandidate, fetchRecentCandles, type SideFilter } from './auto-selector';
+import { getDb } from '@/lib/mongodb';
 
 function getSideFilter(): SideFilter {
   const configured = String(process.env.AUTO_SIGNAL_SIDE_FILTER || 'ALL').toUpperCase();
@@ -39,15 +40,33 @@ export function startAutoSignalGeneration(): () => void {
 
       if (candidates.length === 0) {
         console.log('[Auto Signals] No candidate passed filters in this cycle.');
-        return;
+      } else {
+        for (const candidate of candidates) {
+          await redis.set(`market:${candidate.symbol}:${timeframe}:latest`, JSON.stringify(candidate.candle));
+          await signalQueue.add('generate-signal', { candle: candidate.candle });
+          console.log(
+            `[Auto Signals] Queued ${candidate.symbol} (${timeframe}) | side=${candidate.inferredSide} | score=${candidate.score.toFixed(4)}`
+          );
+        }
       }
 
-      for (const candidate of candidates) {
-        await redis.set(`market:${candidate.symbol}:${timeframe}:latest`, JSON.stringify(candidate.candle));
-        await signalQueue.add('generate-signal', { candle: candidate.candle });
-        console.log(
-          `[Auto Signals] Queued ${candidate.symbol} (${timeframe}) | side=${candidate.inferredSide} | score=${candidate.score.toFixed(4)}`
-        );
+      // ALSO generate one completely random coinpair unconditionally
+      try {
+        const db = await getDb();
+        const assets = await db.collection('assets').find({}).toArray();
+        if (assets.length > 0) {
+          const randomAsset = assets[Math.floor(Math.random() * assets.length)];
+          const symbol = randomAsset.symbol;
+          const candles = await fetchRecentCandles(symbol, timeframe, 50);
+          if (candles && candles.length > 0) {
+            const candle = candles[candles.length - 1];
+            await redis.set(`market:${symbol}:${timeframe}:latest`, JSON.stringify(candle));
+            await signalQueue.add('generate-signal', { candle });
+            console.log(`[Auto Signals] Queued RANDOM unconditional signal for ${symbol} (${timeframe})`);
+          }
+        }
+      } catch (err) {
+        console.error('[Auto Signals] Failed to generate random signal:', err);
       }
     } catch (error) {
       console.error('[Auto Signals] Cycle failed:', error);
