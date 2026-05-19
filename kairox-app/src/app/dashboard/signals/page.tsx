@@ -247,17 +247,20 @@ export default function SignalsPage() {
             <Zap className="w-4 h-4" />
             <span className="text-sm font-medium">On-Demand Generation:</span>
           </div>
-          <select
+          <input
+            list="generate-coins-list"
             value={generateSymbol}
-            onChange={e => setGenerateSymbol(e.target.value)}
+            onChange={e => setGenerateSymbol(e.target.value.toUpperCase())}
+            placeholder="Type coin (e.g. BTCUSDT)"
             className="kx-input font-mono"
-            style={{ width: 'auto', padding: '6px 28px 6px 10px', fontSize: '13px' }}
-          >
+            style={{ width: '240px', padding: '6px 10px', fontSize: '13px' }}
+          />
+          <datalist id="generate-coins-list">
             <option value="AUTO">🤖 Auto-Select Best Candidates</option>
             {assetOptions.filter(a => a !== 'ALL').map(opt => (
               <option key={opt} value={opt}>{opt}</option>
             ))}
-          </select>
+          </datalist>
           
           <button
             onClick={triggerSignalGeneration}

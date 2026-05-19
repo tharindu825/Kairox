@@ -102,15 +102,14 @@ export async function POST() {
     const allTickers: any[] = await tickerRes.json();
     
     // Filter for USDT pairs and sort by volume
-    const top200Symbols = allTickers
+    const allUsdtSymbols = allTickers
       .filter(t => t.symbol.endsWith('USDT') && !t.symbol.includes('UP') && !t.symbol.includes('DOWN') && !t.symbol.includes('BEAR') && !t.symbol.includes('BULL'))
       .sort((a, b) => parseFloat(b.quoteVolume) - parseFloat(a.quoteVolume))
-      .slice(0, 200)
       .map(t => t.symbol);
 
     const db = await getDb();
     
-    for (const symbol of top200Symbols) {
+    for (const symbol of allUsdtSymbols) {
       await db.collection('assets').updateOne(
         { symbol },
         {
@@ -128,7 +127,7 @@ export async function POST() {
       );
     }
 
-    return NextResponse.json({ message: 'Assets synced', count: top200Symbols.length }, { status: 200 });
+    return NextResponse.json({ message: 'Assets synced', count: allUsdtSymbols.length }, { status: 200 });
   } catch (error) {
     console.error('[API] Failed to sync assets:', error);
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
