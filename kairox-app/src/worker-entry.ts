@@ -22,8 +22,8 @@ async function bootstrap() {
   }
   console.log('[Bootstrap] Indicators primed successfully.');
 
-  console.log(`[Workers] Signal Worker initialized (Queue: ${signalWorker.name})`);
-  console.log(`[Workers] Alert Worker initialized (Queue: ${alertWorker.name})`);
+  console.log(`[Workers] Signal Worker initialized (Queue: ${(signalWorker as any).name})`);
+  console.log(`[Workers] Alert Worker initialized (Queue: ${(alertWorker as any).name})`);
 
   console.log('Starting market data websocket stream...');
   marketDataService.startStream();
@@ -33,8 +33,8 @@ async function bootstrap() {
   process.on('SIGINT', async () => {
     console.log('\nGracefully shutting down...');
     stopAutoSignalGeneration();
-    await signalWorker.close();
-    await alertWorker.close();
+    await (signalWorker as any).close();
+    await (alertWorker as any).close();
     process.exit(0);
   });
 }
