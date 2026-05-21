@@ -32,6 +32,14 @@ export function startAutoSignalGeneration(): () => void {
     if (running) return;
     running = true;
     try {
+      // Periodic cleanup of expired paper trades (8 hour limit)
+      try {
+        const { paperTradingService } = await import('@/services/paper-trading');
+        await paperTradingService.cleanupExpiredOrders();
+      } catch (cleanupErr) {
+        console.error('[Auto Signals] Failed to run expired paper trade cleanup:', cleanupErr);
+      }
+
       const candidates = await selectBestSignalCandidate({
         timeframe,
         sideFilter,

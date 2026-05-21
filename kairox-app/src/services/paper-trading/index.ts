@@ -223,6 +223,56 @@ export class PaperTradingService {
 
     return { id: orderId, pnl: pnl.toNumber(), exitPrice: currentPrice.toNumber() };
   }
+
+  /**
+   * Periodically cancels/expires all PENDING paper orders that have been pending for more than 8 hours.
+   */
+  async cleanupExpiredOrders() {
+    const db = await getDb();
+    const now = new Date();
+    const expirationMs = 8 * 60 * 60 * 1000; // 8 hours
+    const threshold = new Date(now.getTime() - expirationMs);
+
+    const expiredOrders = await db.collection('paperOrders')
+      .find({
+        status: 'PENDING',
+        openedAt: { $lt: threshold }
+      })
+      .toArray();
+
+    if (expiredOrders.length === 0) return;
+
+    for (const order of expiredOrders) {
+      await db.collection('paperOrders').updateOne(
+        { _id: order._id },
+        {
+          $set: {
+            status: 'EXPIRED',
+            closedAt: now,
+            exitReason: 'TIMEOUT'
+          }
+        }
+      );
+
+      if (order.signalId) {
+        await db.collection('signals').updateOne(
+          { _id: new ObjectId(order.signalId) },
+          { $set: { status: 'EXPIRED', updatedAt: now } }
+        );
+      }
+
+      console.log(`[Paper Trade Cleanup] Order ${order._id.toString()} expired without reaching entry price (8h limit).`);
+
+      try {
+        await alertQueue.add('send-telegram', {
+          signalId: order.signalId,
+          message: `⏰ SIGNAL EXPIRED: ${order.symbol}\n\nSide: ${order.side}\n\nThis Signal is expired (Entry price not reached within 8 hours).`
+        });
+      } catch (err) {
+        console.error('[Paper Trade Cleanup] Failed to send telegram alert:', err);
+      }
+    }
+  }
 }
 
 export const paperTradingService = new PaperTradingService();

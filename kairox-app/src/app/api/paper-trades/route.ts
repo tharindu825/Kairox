@@ -11,6 +11,14 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    // Automatically cleanup any expired pending orders before returning the list
+    try {
+      const { paperTradingService } = await import('@/services/paper-trading');
+      await paperTradingService.cleanupExpiredOrders();
+    } catch (cleanupErr) {
+      console.error('[API] Failed to run expired paper trade cleanup:', cleanupErr);
+    }
+
     const { searchParams } = new URL(request.url);
     const status = searchParams.get('status');
 

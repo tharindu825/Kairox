@@ -4,11 +4,11 @@ import { ObjectId } from 'mongodb';
 
 export async function POST(
   req: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const db = await getDb();
-    const orderId = params.id;
+    const { id: orderId } = await params;
 
     if (!ObjectId.isValid(orderId)) {
       return NextResponse.json({ error: 'Invalid order ID' }, { status: 400 });
