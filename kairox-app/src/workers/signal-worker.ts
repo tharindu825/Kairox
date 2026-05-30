@@ -124,11 +124,13 @@ export const signalWorker = new Worker(
       }
 
       // 1. Check for Duplicate Signals or Active Trades
+      // Only treat same-candle as duplicate if it was created within the cooldown window
       const [existingSignal, activeTrade] = await Promise.all([
         db.collection('signals').findOne({
           symbol: candle.symbol,
           timeframe: candle.timeframe,
-          candleTimestamp: candle.timestamp
+          candleTimestamp: candle.timestamp,
+          createdAt: { $gte: cooldownCutoff },
         }),
         db.collection('paperOrders').findOne({
           symbol: candle.symbol,

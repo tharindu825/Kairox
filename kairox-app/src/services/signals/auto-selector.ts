@@ -38,7 +38,7 @@ async function resolveCandidateSymbols(explicitSymbols?: string[]): Promise<stri
   }
 
   const db = await getDb();
-  const assets = await db.collection('assets').find({}).toArray();
+  const assets = await db.collection('assets').find({ category: 'CRYPTO' }).toArray();
   const assetSymbols = normalizeSymbols(
     assets.map((asset) => String(asset.symbol || ''))
   );

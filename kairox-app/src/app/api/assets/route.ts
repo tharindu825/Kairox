@@ -101,14 +101,29 @@ export async function POST() {
 
     const allTickers: any[] = await tickerRes.json();
     
-    // Filter for USDT pairs and sort by volume
+    // Stablecoins and index tokens that are NOT tradable crypto signals
+    const EXCLUDED_PREFIXES = new Set([
+      'USDC', 'TUSD', 'FDUSD', 'BUSD', 'DAI', 'USDD', 'USDP', 'PYUSD', 'EURI', 'AEUR',
+    ]);
+    const EXCLUDED_SUBSTRINGS = ['UP', 'DOWN', 'BEAR', 'BULL', 'DOM', 'PERP'];
+
+    // Filter for real crypto USDT spot pairs and sort by 24h quote volume
     const allUsdtSymbols = allTickers
-      .filter(t => t.symbol.endsWith('USDT') && !t.symbol.includes('UP') && !t.symbol.includes('DOWN') && !t.symbol.includes('BEAR') && !t.symbol.includes('BULL'))
+      .filter(t => {
+        const sym: string = t.symbol;
+        if (!sym.endsWith('USDT')) return false;
+        const base = sym.slice(0, -4); // strip 'USDT'
+        if (EXCLUDED_PREFIXES.has(base)) return false;
+        if (EXCLUDED_SUBSTRINGS.some(s => sym.includes(s))) return false;
+        return true;
+      })
       .sort((a, b) => parseFloat(b.quoteVolume) - parseFloat(a.quoteVolume))
       .map(t => t.symbol);
 
     const db = await getDb();
-    
+    const liveSymbolSet = new Set(allUsdtSymbols);
+
+    // Upsert all live symbols from Binance
     for (const symbol of allUsdtSymbols) {
       await db.collection('assets').updateOne(
         { symbol },
@@ -127,7 +142,16 @@ export async function POST() {
       );
     }
 
-    return NextResponse.json({ message: 'Assets synced', count: allUsdtSymbols.length }, { status: 200 });
+    // Remove any assets that are no longer listed on Binance (e.g. delisted / rebranded tokens)
+    const deleteResult = await db.collection('assets').deleteMany({
+      symbol: { $nin: Array.from(liveSymbolSet) }
+    });
+
+    if (deleteResult.deletedCount > 0) {
+      console.log(`[API] Removed ${deleteResult.deletedCount} delisted asset(s) from the database.`);
+    }
+
+    return NextResponse.json({ message: 'Assets synced', count: allUsdtSymbols.length, removed: deleteResult.deletedCount }, { status: 200 });
   } catch (error) {
     console.error('[API] Failed to sync assets:', error);
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
