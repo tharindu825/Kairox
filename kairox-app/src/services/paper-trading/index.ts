@@ -406,6 +406,15 @@ export class PaperTradingService {
 
     const result = await db.collection('paperOrders').insertOne(orderData);
     console.log(`[Paper Trade] Order ${result.insertedId} created for signal ${signalId} — PENDING at $${sig.entry} (entry fee $${round4(entryFee)})`);
+
+    // Dynamically subscribe to the symbol's market data stream so Kairox starts receiving live candle ticks
+    try {
+      const { marketDataService } = await import('../market-data');
+      marketDataService.subscribeSymbol(sig.symbol);
+    } catch (err) {
+      console.error(`[Paper Trade] Failed to dynamically subscribe to WS stream for ${sig.symbol}:`, err);
+    }
+
     return { id: result.insertedId.toString(), ...orderData };
   }
 

@@ -107,6 +107,23 @@ export class BinanceWebSocketClient extends EventEmitter {
     }
   }
 
+  updateSymbols(newSymbols: string[]) {
+    const formatted = Array.from(new Set([...this.symbols, ...newSymbols.map(s => s.toLowerCase())]));
+    
+    // Check if the symbols list actually changed to avoid redundant restarts
+    if (JSON.stringify([...formatted].sort()) === JSON.stringify([...this.symbols].sort())) {
+      return;
+    }
+    
+    console.log(`[Binance WS] Updating stream symbols to:`, formatted);
+    this.symbols = formatted;
+    
+    if (this.ws) {
+      this.disconnect();
+      this.connect();
+    }
+  }
+
   private handleReconnect() {
     if (this.reconnectAttempts < this.maxReconnectAttempts) {
       const delay = Math.pow(2, this.reconnectAttempts) * 1000; // Exponential backoff

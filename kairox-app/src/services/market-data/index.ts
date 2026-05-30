@@ -11,6 +11,20 @@ export class MarketDataService {
    * to automatically persist closed candles to the database.
    */
   async startStream() {
+    // 1. Fetch active/pending symbols from DB and add to streams
+    try {
+      const db = await getDb();
+      const activeOrders = await db.collection('paperOrders')
+        .find({ status: { $in: ['OPEN', 'PENDING'] } })
+        .toArray();
+      const activeSymbols = activeOrders.map(o => o.symbol);
+      if (activeSymbols.length > 0) {
+        binanceWS.updateSymbols(activeSymbols);
+      }
+    } catch (dbErr) {
+      console.error('[Market Data] Failed to load active paper trade symbols for streaming:', dbErr);
+    }
+
     binanceWS.connect();
 
     // Live tick processing for paper trading
@@ -41,6 +55,13 @@ export class MarketDataService {
         console.error('[Market Data] Failed to persist candle:', error);
       }
     });
+  }
+
+  /**
+   * Dynamic subscription helper for Kairox trades
+   */
+  subscribeSymbol(symbol: string) {
+    binanceWS.updateSymbols([symbol]);
   }
 
   private async persistCandle(candle: NormalizedCandle) {
