@@ -20,6 +20,7 @@ import {
   Zap,
   RefreshCw,
   ScrollText,
+  Download,
 } from 'lucide-react';
 
 const fetcher = async (url: string) => {
@@ -68,6 +69,7 @@ export default function SignalsPage() {
   const [generateSymbol, setGenerateSymbol] = useState('AUTO');
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSyncingAssets, setIsSyncingAssets] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
   const [isLogsOpen, setIsLogsOpen] = useState(false);
   const [actionMessage, setActionMessage] = useState('');
   const { data: assets } = useSWR<any[]>('/api/assets', fetcher, { refreshInterval: 30000 });
@@ -162,6 +164,34 @@ export default function SignalsPage() {
       setActionMessage(err instanceof Error ? err.message : 'Failed to sync assets');
     } finally {
       setIsSyncingAssets(false);
+    }
+  };
+
+  const exportSignalsCsv = async () => {
+    setIsExporting(true);
+    try {
+      const params = new URLSearchParams();
+      if (filterSide !== 'ALL') params.set('side', filterSide);
+      if (filterStatus !== 'ALL') params.set('status', filterStatus);
+      // 0 = export all matching signals
+      params.set('limit', '0');
+
+      const url = `/api/signals/export?${params.toString()}`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error('Export failed');
+
+      const blob = await res.blob();
+      const filename = res.headers.get('Content-Disposition')?.match(/filename="(.+)"/)?.at(1)
+        ?? 'kairox-signals.csv';
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = filename;
+      link.click();
+      URL.revokeObjectURL(link.href);
+    } catch (err) {
+      setActionMessage(err instanceof Error ? err.message : 'Export failed');
+    } finally {
+      setIsExporting(false);
     }
   };
 
@@ -328,6 +358,16 @@ export default function SignalsPage() {
           >
             {isSyncingAssets ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
             Sync Assets
+          </button>
+          <button
+            onClick={exportSignalsCsv}
+            disabled={isExporting}
+            className="kx-btn px-3 py-2 text-xs font-medium flex items-center gap-1.5"
+            style={{ background: 'rgba(0,212,170,0.08)', color: 'var(--kx-success)', opacity: isExporting ? 0.7 : 1 }}
+            title="Export signals to Excel/CSV"
+          >
+            {isExporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+            Export CSV
           </button>
         </div>
       </div>
