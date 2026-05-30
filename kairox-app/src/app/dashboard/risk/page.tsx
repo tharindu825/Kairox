@@ -130,164 +130,175 @@ export default function RiskPage() {
           </div>
 
           {/* Paper Trades + Blocked Signals + System Status */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
             {/* Paper Trades Table */}
-            <div className="lg:col-span-2 space-y-4">
+            <div className="lg:col-span-3 space-y-4">
               <h3 className="font-semibold flex items-center gap-2" style={{ color: 'var(--kx-text-primary)' }}>
                 <DollarSign className="w-4 h-4" /> Paper Trades
               </h3>
 
               <div className="kx-card overflow-hidden">
-                <table className="kx-table">
-                  <thead>
-                    <tr>
-                      <th>Asset</th>
-                      <th>Side</th>
-                      <th>Entry / SL</th>
-                      <th>TP Progress</th>
-                      <th>Qty (rem/total)</th>
-                      <th>P&L (net)</th>
-                      <th>Fees</th>
-                      <th>Status / Action</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(!paperData?.orders || paperData.orders.length === 0) && (
+                <div className="overflow-x-auto">
+                  <table className="kx-table">
+                    <thead>
                       <tr>
-                        <td colSpan={8} className="text-center py-8" style={{ color: 'var(--kx-text-muted)' }}>
-                          <DollarSign className="w-6 h-6 mx-auto mb-2 opacity-30" />
-                          No paper trades yet
-                        </td>
+                        <th>Asset</th>
+                        <th>Side</th>
+                        <th>Entry / SL</th>
+                        <th>TP Progress</th>
+                        <th>P&L (net)</th>
+                        <th>Status / Action</th>
                       </tr>
-                    )}
-                    {paperData?.orders?.slice(0, 15).map((order: any) => {
-                      const tpDots = [
-                        { label: 'TP1', hit: order.tp1Hit },
-                        { label: 'TP2', hit: order.tp2Hit },
-                        { label: 'TP3', hit: order.tp3Hit },
-                      ];
-                      const exitReasonColors: Record<string, string> = {
-                        SL_HIT: 'var(--kx-short)',
-                        TRAILING_STOP: 'var(--kx-warning)',
-                        BREAKEVEN_STOP: 'var(--kx-warning)',
-                        TP1_PARTIAL: 'var(--kx-long)',
-                        TP2_PARTIAL: 'var(--kx-long)',
-                        TP3_FULL: 'var(--kx-success)',
-                        MANUAL_CLOSE: 'var(--kx-text-muted)',
-                        TIMEOUT: 'var(--kx-text-muted)',
-                      };
-                      const exitColor = exitReasonColors[order.exitReason] ?? 'var(--kx-text-muted)';
-
-                      return (
-                        <tr key={order.id}>
-                          <td className="font-mono text-sm font-medium">{order.symbol}</td>
-                          <td>
-                            <span className={`${order.side === 'LONG' ? 'kx-badge-long' : 'kx-badge-short'} px-2 py-0.5 rounded text-xs font-bold`}>
-                              {order.side === 'LONG' ? <ArrowUpRight className="w-3 h-3 inline mr-0.5" /> : <ArrowDownRight className="w-3 h-3 inline mr-0.5" />}
-                              {order.side}
-                            </span>
-                          </td>
-                          <td className="font-mono text-xs">
-                            <div>${order.entryPrice?.toLocaleString()}</div>
-                            <div style={{ color: 'var(--kx-short)', fontSize: '10px' }}>SL ${order.stopLoss?.toFixed ? order.stopLoss.toFixed(4) : order.stopLoss}</div>
-                            {order.breakEvenMoved && (
-                              <div style={{ color: 'var(--kx-success)', fontSize: '10px' }}>⚡ BE moved</div>
-                            )}
-                            {order.trailingStopActive && (
-                              <div style={{ color: 'var(--kx-warning)', fontSize: '10px' }}>🔁 Trailing</div>
-                            )}
-                          </td>
-                          <td>
-                            <div className="flex items-center gap-1">
-                              {tpDots.map(tp => (
-                                <span
-                                  key={tp.label}
-                                  className="text-[10px] font-bold px-1.5 py-0.5 rounded"
-                                  style={{
-                                    background: tp.hit ? 'rgba(0,212,170,0.15)' : 'rgba(255,255,255,0.05)',
-                                    color: tp.hit ? 'var(--kx-success)' : 'var(--kx-text-muted)',
-                                    border: `1px solid ${tp.hit ? 'rgba(0,212,170,0.3)' : 'transparent'}`,
-                                  }}
-                                >
-                                  {tp.hit ? '✓' : '·'} {tp.label}
-                                </span>
-                              ))}
-                            </div>
-                          </td>
-                          <td className="font-mono text-xs" style={{ color: 'var(--kx-text-muted)' }}>
-                            {order.remainingQty?.toFixed ? order.remainingQty.toFixed(4) : order.remainingQty}
-                            <span style={{ color: 'var(--kx-text-muted)', opacity: 0.5 }}> / {order.quantity?.toFixed ? order.quantity.toFixed(4) : order.quantity}</span>
-                          </td>
-                          <td className="font-mono text-sm" style={{
-                            color: order.pnl != null ? (order.pnl >= 0 ? 'var(--kx-long)' : 'var(--kx-short)') : 'var(--kx-text-muted)'
-                          }}>
-                            {order.pnl != null ? `${order.pnl >= 0 ? '+' : ''}$${order.pnl.toFixed(2)}` : '—'}
-                            {order.realizedPnl > 0 && order.status === 'OPEN' && (
-                              <div style={{ fontSize: '10px', color: 'var(--kx-success)', opacity: 0.8 }}>
-                                +${order.realizedPnl.toFixed(2)} realised
-                              </div>
-                            )}
-                          </td>
-                          <td className="font-mono text-xs" style={{ color: 'var(--kx-text-muted)' }}>
-                            ${order.feesTotal?.toFixed(4) ?? '0.0000'}
-                          </td>
-                          <td className="text-xs">
-                            <div className="flex flex-col gap-1.5">
-                              <div className="flex items-center gap-1.5">
-                                <span className={`px-2 py-0.5 rounded text-xs font-medium ${
-                                  order.status === 'OPEN'    ? 'kx-badge-long' :
-                                  order.status === 'CLOSED'  ? 'kx-verdict-approved' :
-                                  order.status === 'STOPPED' ? 'kx-verdict-blocked' :
-                                  order.status === 'PENDING' ? 'kx-verdict-watch' : ''
-                                }`}>
-                                  {order.status}
-                                </span>
-                                {order.exitReason && (
-                                  <span className="text-[10px] font-mono" style={{ color: exitColor }}>
-                                    {order.exitReason.replace(/_/g, ' ')}
-                                  </span>
-                                )}
-                              </div>
-                              <div style={{ color: 'var(--kx-text-muted)', fontSize: '10px' }}>{timeAgo(order.openedAt)}</div>
-                              {order.status === 'OPEN' && (
-                                <button
-                                  onClick={async () => {
-                                    if (!window.confirm(`Close ${order.symbol} ${order.side} position?`)) return;
-                                    try {
-                                      const res = await fetch(`/api/paper-trades/${order.id}/close`, { method: 'POST' });
-                                      if (res.ok) { mutatePaper(); mutateRisk(); }
-                                      else { const e = await res.json(); alert(`Failed: ${e.error}`); }
-                                    } catch (err) { alert('Error closing trade'); }
-                                  }}
-                                  className="text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded bg-white/5 hover:bg-white/10 transition-colors"
-                                  style={{ color: 'var(--kx-text-primary)' }}
-                                >
-                                  Close
-                                </button>
-                              )}
-                              {order.status === 'PENDING' && (
-                                <button
-                                  onClick={async () => {
-                                    if (!window.confirm(`Cancel ${order.symbol} ${order.side} pending order?`)) return;
-                                    try {
-                                      const res = await fetch(`/api/paper-trades/${order.id}/cancel`, { method: 'POST' });
-                                      if (res.ok) { mutatePaper(); mutateRisk(); }
-                                      else { const e = await res.json(); alert(`Failed: ${e.error}`); }
-                                    } catch (err) { alert('Error canceling trade'); }
-                                  }}
-                                  className="text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded transition-colors"
-                                  style={{ background: 'rgba(255,71,87,0.1)', color: 'var(--kx-short)' }}
-                                >
-                                  Cancel
-                                </button>
-                              )}
-                            </div>
+                    </thead>
+                    <tbody>
+                      {(!paperData?.orders || paperData.orders.length === 0) && (
+                        <tr>
+                          <td colSpan={6} className="text-center py-8" style={{ color: 'var(--kx-text-muted)' }}>
+                            <DollarSign className="w-6 h-6 mx-auto mb-2 opacity-30" />
+                            No paper trades yet
                           </td>
                         </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+                      )}
+                      {paperData?.orders?.slice(0, 15).map((order: any) => {
+                        const tpDots = [
+                          { label: 'TP1', hit: order.tp1Hit },
+                          { label: 'TP2', hit: order.tp2Hit },
+                          { label: 'TP3', hit: order.tp3Hit },
+                        ];
+                        const exitReasonColors: Record<string, string> = {
+                          SL_HIT: 'var(--kx-short)',
+                          TRAILING_STOP: 'var(--kx-warning)',
+                          BREAKEVEN_STOP: 'var(--kx-warning)',
+                          TP1_PARTIAL: 'var(--kx-long)',
+                          TP2_PARTIAL: 'var(--kx-long)',
+                          TP3_FULL: 'var(--kx-success)',
+                          MANUAL_CLOSE: 'var(--kx-text-muted)',
+                          TIMEOUT: 'var(--kx-text-muted)',
+                        };
+                        const exitColor = exitReasonColors[order.exitReason] ?? 'var(--kx-text-muted)';
+
+                        return (
+                          <tr key={order.id}>
+                            <td className="font-mono text-sm font-medium">{order.symbol}</td>
+                            <td>
+                              <span className={`${order.side === 'LONG' ? 'kx-badge-long' : 'kx-badge-short'} px-2 py-0.5 rounded text-xs font-bold`}>
+                                {order.side === 'LONG' ? <ArrowUpRight className="w-3 h-3 inline mr-0.5" /> : <ArrowDownRight className="w-3 h-3 inline mr-0.5" />}
+                                {order.side}
+                              </span>
+                            </td>
+                            <td className="font-mono text-xs">
+                              <div>${order.entryPrice?.toLocaleString()}</div>
+                              <div style={{ color: 'var(--kx-short)', fontSize: '10px' }}>SL ${order.stopLoss?.toFixed ? order.stopLoss.toFixed(4) : order.stopLoss}</div>
+                              {order.breakEvenMoved && (
+                                <div style={{ color: 'var(--kx-success)', fontSize: '10px' }}>⚡ BE moved</div>
+                              )}
+                              {order.trailingStopActive && (
+                                <div style={{ color: 'var(--kx-warning)', fontSize: '10px' }}>🔁 Trailing</div>
+                              )}
+                            </td>
+                            <td>
+                              <div className="flex items-center gap-1">
+                                {tpDots.map(tp => (
+                                  <span
+                                    key={tp.label}
+                                    className="text-[10px] font-bold px-1.5 py-0.5 rounded"
+                                    style={{
+                                      background: tp.hit ? 'rgba(0,212,170,0.15)' : 'rgba(255,255,255,0.05)',
+                                      color: tp.hit ? 'var(--kx-success)' : 'var(--kx-text-muted)',
+                                      border: `1px solid ${tp.hit ? 'rgba(0,212,170,0.3)' : 'transparent'}`,
+                                    }}
+                                  >
+                                    {tp.hit ? '✓' : '·'} {tp.label}
+                                  </span>
+                                ))}
+                              </div>
+                            </td>
+
+                            <td className="font-mono text-sm" style={{
+                              color: order.pnl != null ? (order.pnl >= 0 ? 'var(--kx-long)' : 'var(--kx-short)') : 'var(--kx-text-muted)'
+                            }}>
+                              {order.pnl != null ? `${order.pnl >= 0 ? '+' : ''}$${order.pnl.toFixed(2)}` : '—'}
+                              {order.realizedPnl > 0 && order.status === 'OPEN' && (
+                                <div style={{ fontSize: '10px', color: 'var(--kx-success)', opacity: 0.8 }}>
+                                  +${order.realizedPnl.toFixed(2)} realised
+                                </div>
+                              )}
+                            </td>
+
+                            <td className="text-xs">
+                              <div className="flex flex-col gap-1.5">
+                                <div className="flex items-center gap-1.5">
+                                  <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                                    order.status === 'OPEN'    ? 'kx-badge-long' :
+                                    order.status === 'CLOSED'  ? 'kx-verdict-approved' :
+                                    order.status === 'STOPPED' ? 'kx-verdict-blocked' :
+                                    order.status === 'PENDING' ? 'kx-verdict-watch' : ''
+                                  }`}>
+                                    {order.status}
+                                  </span>
+                                  {order.exitReason && (
+                                    <span className="text-[10px] font-mono" style={{ color: exitColor }}>
+                                      {order.exitReason.replace(/_/g, ' ')}
+                                    </span>
+                                  )}
+                                </div>
+                                <div style={{ color: 'var(--kx-text-muted)', fontSize: '10px' }}>{timeAgo(order.openedAt)}</div>
+                                {order.status === 'OPEN' && (
+                                  <button
+                                    onClick={async () => {
+                                      if (!window.confirm(`Stop trading and close ${order.symbol} ${order.side} position?`)) return;
+                                      try {
+                                        const res = await fetch(`/api/paper-trades/${order.id}/close`, { method: 'POST' });
+                                        if (res.ok) { mutatePaper(); mutateRisk(); }
+                                        else { const e = await res.json(); alert(`Failed: ${e.error}`); }
+                                      } catch (err) { alert('Error closing trade'); }
+                                    }}
+                                    className="text-[10px] font-bold uppercase tracking-wider px-2 py-1.5 rounded transition-colors text-center font-mono w-full"
+                                    style={{ background: 'rgba(255,71,87,0.1)', color: 'var(--kx-short)' }}
+                                  >
+                                    Stop
+                                  </button>
+                                )}
+                                {order.status === 'PENDING' && (
+                                  <div className="flex flex-col gap-1 w-full">
+                                    <button
+                                      onClick={async () => {
+                                        if (!window.confirm(`Start paper trading ${order.symbol} ${order.side} immediately from current market price?`)) return;
+                                        try {
+                                          const res = await fetch(`/api/paper-trades/${order.id}/start`, { method: 'POST' });
+                                          if (res.ok) { mutatePaper(); mutateRisk(); }
+                                          else { const e = await res.json(); alert(`Failed: ${e.error}`); }
+                                        } catch (err) { alert('Error starting trade'); }
+                                      }}
+                                      className="text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded transition-colors text-center font-mono"
+                                      style={{ background: 'rgba(0,212,170,0.1)', color: 'var(--kx-long)' }}
+                                    >
+                                      Start
+                                    </button>
+                                    <button
+                                      onClick={async () => {
+                                        if (!window.confirm(`Cancel ${order.symbol} ${order.side} pending order?`)) return;
+                                        try {
+                                          const res = await fetch(`/api/paper-trades/${order.id}/cancel`, { method: 'POST' });
+                                          if (res.ok) { mutatePaper(); mutateRisk(); }
+                                          else { const e = await res.json(); alert(`Failed: ${e.error}`); }
+                                        } catch (err) { alert('Error canceling trade'); }
+                                      }}
+                                      className="text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded transition-colors text-center font-mono"
+                                      style={{ background: 'rgba(255,255,255,0.05)', color: 'var(--kx-text-muted)', border: '1px solid var(--kx-glass-border)' }}
+                                    >
+                                      Cancel
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
               </div>
               {/* Fees summary */}
               {paperData?.stats?.totalFeesPaid > 0 && (
@@ -326,7 +337,7 @@ export default function RiskPage() {
             </div>
 
             {/* System Status */}
-            <div className="space-y-4">
+            <div className="lg:col-span-1 space-y-4">
               <h3 className="font-semibold flex items-center gap-2" style={{ color: 'var(--kx-text-primary)' }}>
                 <Clock className="w-4 h-4" /> System Status
               </h3>

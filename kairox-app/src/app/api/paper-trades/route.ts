@@ -23,8 +23,35 @@ export async function GET(request: Request) {
     const status = searchParams.get('status');
 
     const db = await getDb();
-    const query: any = {};
-    if (status && status !== 'ALL') query.status = status;
+    const now = new Date();
+    const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+
+    // Build query: only active (OPEN, PENDING) OR completed in last 24 hours
+    const query: any = {
+      $or: [
+        { status: { $in: ['OPEN', 'PENDING'] } },
+        {
+          status: { $in: ['CLOSED', 'STOPPED', 'EXPIRED', 'CANCELLED'] },
+          $or: [
+            { closedAt: { $gte: oneDayAgo } },
+            { closedAt: { $exists: false }, openedAt: { $gte: oneDayAgo } }
+          ]
+        }
+      ]
+    };
+
+    if (status && status !== 'ALL') {
+      if (['OPEN', 'PENDING'].includes(status)) {
+        query.status = status;
+        delete query.$or;
+      } else {
+        query.status = status;
+        query.$or = [
+          { closedAt: { $gte: oneDayAgo } },
+          { closedAt: { $exists: false }, openedAt: { $gte: oneDayAgo } }
+        ];
+      }
+    }
 
     const docs = await db.collection('paperOrders')
       .find(query)
@@ -102,22 +129,26 @@ export async function GET(request: Request) {
       };
     }));
 
-    // Aggregate stats
-    const closed   = formatted.filter(o => o.status === 'CLOSED' || o.status === 'STOPPED');
-    const wins     = closed.filter(o => (o.pnl ?? 0) > 0);
-    const totalPnL = closed.reduce((s, o) => s + (o.pnl ?? 0), 0);
-    const winRate  = closed.length > 0 ? (wins.length / closed.length) * 100 : 0;
-    const totalFeesPaid = formatted.reduce((s, o) => s + (o.feesTotal ?? 0), 0);
+    // Fetch projected trades to calculate accurate all-time statistics across all-time trading history
+    const allTradesStats = await db.collection('paperOrders')
+      .find({}, { projection: { status: 1, pnl: 1, feesTotal: 1 } })
+      .toArray();
+
+    const closedAll   = allTradesStats.filter(o => o.status === 'CLOSED' || o.status === 'STOPPED');
+    const winsAll     = closedAll.filter(o => Number(o.pnl ?? 0) > 0);
+    const totalPnL    = closedAll.reduce((s, o) => s + Number(o.pnl ?? 0), 0);
+    const winRate     = closedAll.length > 0 ? (winsAll.length / closedAll.length) * 100 : 0;
+    const totalFeesPaid = allTradesStats.reduce((s, o) => s + Number(o.feesTotal ?? 0), 0);
 
     return NextResponse.json({
       orders: formatted,
       stats: {
-        totalTrades: closed.length,
-        openTrades:  formatted.filter(o => o.status === 'OPEN').length,
+        totalTrades: closedAll.length,
+        openTrades:  allTradesStats.filter(o => o.status === 'OPEN').length,
         winRate:     Math.round(winRate * 10) / 10,
         totalPnL:    Math.round(totalPnL * 100) / 100,
-        wins:        wins.length,
-        losses:      closed.length - wins.length,
+        wins:        winsAll.length,
+        losses:      closedAll.length - winsAll.length,
         totalFeesPaid: Math.round(totalFeesPaid * 100) / 100,
       },
     });

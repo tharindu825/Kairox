@@ -475,6 +475,55 @@ export class PaperTradingService {
   }
 
   /**
+   * Manually activates a pending order immediately at the current live market price.
+   */
+  async startOrderNow(orderId: string) {
+    const db = await getDb();
+    const order = await db.collection('paperOrders').findOne({ _id: new ObjectId(orderId) });
+
+    if (!order) {
+      throw new Error('Order not found');
+    }
+    if (order.status !== 'PENDING') {
+      throw new Error('Order is not in PENDING status');
+    }
+
+    const { marketDataService } = await import('../market-data');
+    const priceRaw = await marketDataService.getLatestPrice(order.symbol);
+    if (!priceRaw) {
+      throw new Error(`No live price for ${order.symbol}`);
+    }
+
+    const currentPrice = Number(priceRaw);
+    const qty = Number(order.remainingQty ?? order.quantity);
+    const entryFee = calcFee(currentPrice, qty);
+    const now = new Date();
+
+    await db.collection('paperOrders').updateOne(
+      { _id: new ObjectId(orderId) },
+      {
+        $set: {
+          status: 'OPEN',
+          entryPrice: currentPrice,
+          openedAt: now,
+          entryFee,
+          feesTotal: entryFee,
+          highWaterMark: currentPrice,
+        }
+      }
+    );
+
+    console.log(`[Paper Trade] Manual start: ${orderId} activated at market price $${currentPrice}`);
+
+    await alertQueue.add('send-telegram', {
+      signalId: order.signalId,
+      message: `🚀 TRADE ACTIVATED MANUALLY: ${order.symbol}\n\nSide: ${order.side}\nEntry: $${fmt(currentPrice)}\nSize: ${qty} units\nSL: $${fmt(order.stopLoss)}\nFee: $${fmt(entryFee)}`,
+    });
+
+    return { success: true, fillPrice: currentPrice };
+  }
+
+  /**
    * Batch-expires all PENDING orders older than 8 hours.
    * Called lazily on GET /api/paper-trades.
    */
