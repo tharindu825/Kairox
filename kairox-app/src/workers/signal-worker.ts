@@ -106,6 +106,23 @@ export const signalWorker = new Worker(
 
     try {
       const db = await getDb();
+
+      // 0. 8-Hour Cooldown Check — skip if a signal was already generated for this symbol in the last 8 hours
+      const SIGNAL_COOLDOWN_MS = 8 * 60 * 60 * 1000; // 8 hours
+      const cooldownCutoff = new Date(Date.now() - SIGNAL_COOLDOWN_MS);
+      const recentSignal = await db.collection('signals').findOne(
+        { symbol: candle.symbol, createdAt: { $gte: cooldownCutoff } },
+        { sort: { createdAt: -1 } }
+      );
+      if (recentSignal) {
+        const ageMinutes = Math.floor((Date.now() - new Date(recentSignal.createdAt).getTime()) / 60000);
+        await Logger.info(
+          `Signal already exists for ${candle.symbol} (${ageMinutes}m ago, cooldown: 8h) — Skipping.`,
+          'Signal Worker'
+        );
+        return { status: 'skipped', reason: 'cooldown_8h' };
+      }
+
       // 1. Check for Duplicate Signals or Active Trades
       const [existingSignal, activeTrade] = await Promise.all([
         db.collection('signals').findOne({

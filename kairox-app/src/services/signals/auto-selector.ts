@@ -197,23 +197,22 @@ export async function selectBestSignalCandidate(
   
   if (candidates.length === 0) return [];
 
-  // Diversity: penalize symbols that already have recent signals (last 2 cycles)
+  // Hard 8-hour cooldown: exclude symbols that already have a signal created in the last 8 hours
   const db = await getDb();
-  const intervalMs = Number(process.env.AUTO_SIGNAL_INTERVAL_SECONDS || 300) * 1000;
-  const recentCutoff = new Date(Date.now() - intervalMs * 2);
+  const SIGNAL_COOLDOWN_MS = 8 * 60 * 60 * 1000; // 8 hours
+  const cooldownCutoff = new Date(Date.now() - SIGNAL_COOLDOWN_MS);
   const recentSignals = await db.collection('signals')
-    .find({ createdAt: { $gte: recentCutoff } })
+    .find({ createdAt: { $gte: cooldownCutoff } })
     .project({ symbol: 1 })
     .toArray();
   const recentSymbols = new Set(recentSignals.map((s) => s.symbol));
 
-  // Apply diversity penalty: reduce score of recently-signaled assets by 70%
-  const diversified = candidates.map((c) => ({
-    ...c,
-    score: recentSymbols.has(c.symbol) ? c.score * 0.3 : c.score,
-  }));
+  // Filter out symbols in cooldown entirely
+  const eligible = candidates.filter((c) => !recentSymbols.has(c.symbol));
+
+  if (eligible.length === 0) return [];
 
   // Return the top N candidates sorted by score
-  return diversified.sort((a, b) => b.score - a.score).slice(0, limit);
+  return eligible.sort((a, b) => b.score - a.score).slice(0, limit);
 }
 
