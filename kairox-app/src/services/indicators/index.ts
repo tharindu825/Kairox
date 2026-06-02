@@ -22,7 +22,10 @@ interface SymbolState {
   ema200: EMA;
   atr: ATR;
   bb: BollingerBands;
+  volumeBuffer: number[];
 }
+
+const VOLUME_LOOKBACK = 20; // Rolling window for volume average
 
 export class IndicatorService {
   private states: Map<string, SymbolState> = new Map();
@@ -40,6 +43,7 @@ export class IndicatorService {
         ema200: new EMA(200),
         atr: new ATR(14),
         bb: new BollingerBands(20, 2),
+        volumeBuffer: [],
       };
       this.states.set(key, state);
     }
@@ -71,6 +75,12 @@ export class IndicatorService {
     // ATR requires High, Low, Close
     state.atr.update({ high: candle.high, low: candle.low, close: candle.close }, false);
     state.bb.update(candle.close, false);
+
+    // Track rolling volume buffer for volume profile analysis
+    state.volumeBuffer.push(candle.volume);
+    if (state.volumeBuffer.length > VOLUME_LOOKBACK) {
+      state.volumeBuffer.shift();
+    }
   }
 
   /**
@@ -126,7 +136,21 @@ export class IndicatorService {
   }
 
   private analyzeVolume(candle: NormalizedCandle): string {
-    return 'ELEVATED';
+    const state = this.getOrCreateState(candle.symbol, candle.timeframe);
+    const buf = state.volumeBuffer;
+
+    if (buf.length < 5) return 'NORMAL'; // Not enough data yet
+
+    const avgVolume = buf.reduce((a, b) => a + b, 0) / buf.length;
+    if (avgVolume <= 0) return 'LOW';
+
+    const ratio = candle.volume / avgVolume;
+
+    if (ratio > 2.5)  return 'SPIKE';     // Exceptionally high volume
+    if (ratio > 1.5)  return 'ELEVATED';  // Above average
+    if (ratio < 0.5)  return 'LOW';       // Very low volume
+    if (ratio < 0.8)  return 'DECLINING';  // Below average
+    return 'NORMAL';
   }
 
   private calculateTrend(close: number, ema20: number, ema50: number, ema200: number) {

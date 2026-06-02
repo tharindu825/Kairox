@@ -13,6 +13,9 @@ const TP1_RATIO = 0.50; // 50% of position closed at TP1
 const TP2_RATIO = 0.30; // 30% closed at TP2
 // TP3 closes the remaining 20% (whatever is left)
 
+/** Buffer above/below breakeven to avoid noise stop-outs after TP1 */
+const BREAKEVEN_BUFFER_PCT = 0.003; // 0.3%
+
 /** Trailing stop distance as fraction of price, activated after TP2 is hit */
 const TRAILING_STOP_PCT = 0.015; // 1.5%
 
@@ -236,10 +239,19 @@ export class PaperTradingService {
 
         setUpdates.tp1Hit         = true;
         setUpdates.breakEvenMoved = true;
-        setUpdates.stopLoss       = entryPrice;   // ← breakeven
+        // Move SL to breakeven + buffer (0.3%) to avoid noise stop-outs
+        const beBuffer = entryPrice * BREAKEVEN_BUFFER_PCT;
+        setUpdates.stopLoss       = side === 'LONG'
+          ? entryPrice + beBuffer   // slightly in profit for LONG
+          : entryPrice - beBuffer;  // slightly in profit for SHORT
         setUpdates.remainingQty   = remainingQty;
         setUpdates.realizedPnl    = round2(realizedPnl);
         setUpdates.feesTotal      = round4(feesTotal);
+        // Activate trailing stop early (after TP1) instead of waiting for TP2
+        hwm                                = targets[0].price;
+        trailing                           = true;
+        setUpdates.trailingStopActive      = true;
+        setUpdates.highWaterMark           = hwm;
 
         pushExits.push({
           reason: 'TP1_PARTIAL',
@@ -252,7 +264,7 @@ export class PaperTradingService {
         });
 
         messages.push(
-          `✅ TP1 HIT (50%): ${candle.symbol}\n\nSide: ${side}\nTP1: $${fmt(tp1)}\nClosed: ${closeQty} units\nPartial P&L: $${round2(netPnl)}\n⚡ SL moved to breakeven ($${fmt(entryPrice)})`
+          `✅ TP1 HIT (50%): ${candle.symbol}\n\nSide: ${side}\nTP1: $${fmt(tp1)}\nClosed: ${closeQty} units\nPartial P&L: $${round2(netPnl)}\n⚡ SL moved to breakeven+buffer | 🔁 Trailing stop activated`
         );
         console.log(`[Paper Trade] ${orderId} TP1 @ $${tp1}. SL → breakeven $${entryPrice}. Remaining: ${remainingQty}`);
       }

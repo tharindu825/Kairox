@@ -208,6 +208,37 @@ export const signalWorker = new Worker(
         riskAssessment.reasons.push('Absolute model disagreement (LONG vs SHORT)');
       }
 
+      // 5b. Multi-Timeframe Confirmation (P7) — check daily trend alignment
+      if (primarySignal.side !== 'HOLD' && riskAssessment.verdict !== 'BLOCKED') {
+        try {
+          const { binanceREST } = await import('@/services/market-data/binance-rest');
+          const dailyCandles = await binanceREST.getKlines(candle.symbol, '1d', 220);
+          if (dailyCandles.length >= 60) {
+            const dailyIndicator = new (await import('@/services/indicators')).IndicatorService();
+            for (const dc of dailyCandles) {
+              dailyIndicator.update(dc);
+            }
+            const dailyFeatures = dailyIndicator.getFeatureBundle(dailyCandles[dailyCandles.length - 1]);
+            const dailyTrend = dailyFeatures.trend;
+
+            const isCounterTrend =
+              (primarySignal.side === 'LONG' && (dailyTrend === 'BEAR' || dailyTrend === 'STRONG_BEAR')) ||
+              (primarySignal.side === 'SHORT' && (dailyTrend === 'BULL' || dailyTrend === 'STRONG_BULL'));
+
+            if (isCounterTrend) {
+              riskAssessment.verdict = 'BLOCKED';
+              riskAssessment.reasons.push(`Counter-trend: ${primarySignal.side} signal vs daily ${dailyTrend} trend`);
+              await Logger.info(`[MTF] Blocked ${candle.symbol} ${primarySignal.side} — daily trend is ${dailyTrend}`, 'Signal Worker');
+            } else {
+              await Logger.info(`[MTF] ${candle.symbol} ${primarySignal.side} aligned with daily ${dailyTrend}`, 'Signal Worker');
+            }
+          }
+        } catch (mtfErr) {
+          // Non-critical: if daily data fetch fails, proceed without MTF filter
+          console.warn(`[Signal Worker] MTF check failed for ${candle.symbol}:`, (mtfErr as Error).message);
+        }
+      }
+
       // 6. Persist Signal to DB
       const asset = await db.collection('assets').findOne({ symbol: candle.symbol });
       if (!asset) throw new Error('Asset not found');

@@ -23,7 +23,7 @@ const DEFAULT_POLICY: RiskPolicy = {
   maxRiskPercent: 2.0,
   maxOpenTrades: 10,
   maxCorrelated: 3,
-  minRewardRisk: 1.0,
+  minRewardRisk: 1.5,
   dailyDrawdownLimit: 10.0,
   cooldownMinutes: 30,
 };

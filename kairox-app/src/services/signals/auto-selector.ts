@@ -104,15 +104,15 @@ function passesIndicatorFilters(
     ? features.macd.histogram > 0
     : features.macd.histogram < 0;
 
-  // Wider RSI ranges to allow more setups through
+  // Tightened RSI sweet-spot to filter out marginal setups
   const rsiAligned = inferredSide === 'LONG'
-    ? features.rsi >= 35 && features.rsi <= 72
-    : features.rsi >= 28 && features.rsi <= 65;
+    ? features.rsi >= 40 && features.rsi <= 65
+    : features.rsi >= 35 && features.rsi <= 60;
 
-  // Require at least ONE EMA alignment (relaxed from both)
+  // Require BOTH EMAs to align for stronger confirmation
   const emaAligned = inferredSide === 'LONG'
-    ? close >= features.ema20 || close >= features.ema50
-    : close <= features.ema20 || close <= features.ema50;
+    ? close >= features.ema20 && close >= features.ema50
+    : close <= features.ema20 && close <= features.ema50;
 
   // Allow both STRONG and regular BULL/BEAR trends
   const trend = features.trend;
