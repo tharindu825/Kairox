@@ -20,6 +20,15 @@ function timeAgo(date: Date | string): string {
   return `${hours}h ago`;
 }
 
+function formatPrice(price: number): string {
+  const p = Number(price);
+  if (!Number.isFinite(p)) return '0';
+  if (p >= 100) return p.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  if (p >= 1) return p.toFixed(4);
+  if (p >= 0.01) return p.toFixed(5);
+  return p.toFixed(6);
+}
+
 export default function RiskPage() {
   const { data, error, isLoading, mutate: mutateRisk } = useSWR('/api/risk', fetcher, { refreshInterval: 5000 });
   const { data: paperData, mutate: mutatePaper } = useSWR('/api/paper-trades', fetcher, { refreshInterval: 5000 });
@@ -187,8 +196,8 @@ export default function RiskPage() {
                               </span>
                             </td>
                             <td className="font-mono text-xs">
-                              <div>${order.entryPrice?.toLocaleString()}</div>
-                              <div style={{ color: 'var(--kx-short)', fontSize: '10px' }}>SL ${order.stopLoss?.toFixed ? order.stopLoss.toFixed(4) : order.stopLoss}</div>
+                              <div>${formatPrice(order.entryPrice)}</div>
+                              <div style={{ color: 'var(--kx-short)', fontSize: '10px' }}>SL ${formatPrice(order.stopLoss)}</div>
                               {order.breakEvenMoved && (
                                 <div style={{ color: 'var(--kx-success)', fontSize: '10px' }}>⚡ BE moved</div>
                               )}
