@@ -85,7 +85,7 @@ export class PaperTradingService {
         { _id: new ObjectId(orderId) },
         { $set: { status: 'EXPIRED', closedAt: now, exitReason: 'TIMEOUT' } }
       );
-      if (order.signalId) {
+      if (order.signalId && order.source !== 'SHADOW_TEST') {
         await db.collection('signals').updateOne(
           { _id: new ObjectId(order.signalId) },
           { $set: { status: 'EXPIRED', updatedAt: now } }
@@ -635,7 +635,7 @@ export class PaperTradingService {
         { _id: order._id },
         { $set: { status: 'EXPIRED', closedAt: new Date(), exitReason: 'TIMEOUT' } }
       );
-      if (order.signalId) {
+      if (order.signalId && order.source !== 'SHADOW_TEST') {
         await db.collection('signals').updateOne(
           { _id: new ObjectId(order.signalId) },
           { $set: { status: 'EXPIRED', updatedAt: new Date() } }
