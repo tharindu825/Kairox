@@ -189,14 +189,6 @@ export default function DashboardLayout({
 
         {/* Bottom section */}
         <div className="p-3 shrink-0" style={{ borderTop: '1px solid var(--kx-glass-border)' }}>
-          <button
-            onClick={() => signOut({ callbackUrl: '/login' })}
-            className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm hover:bg-white/5 transition-colors mb-2 ${sidebarCollapsed ? 'justify-center' : ''}`}
-            style={{ color: 'var(--kx-text-secondary)' }}
-          >
-            <LogOut className="w-4 h-4 shrink-0" />
-            {!sidebarCollapsed && <span>Sign Out</span>}
-          </button>
           <div className={`flex items-center gap-2 px-3 py-2 text-xs ${sidebarCollapsed ? 'justify-center' : ''}`}
                style={{ color: 'var(--kx-text-muted)' }}>
             <div className="w-2 h-2 rounded-full shrink-0" style={{ background: 'var(--kx-success)' }} />
