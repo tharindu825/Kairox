@@ -21,6 +21,7 @@ import {
   RefreshCw,
   ScrollText,
   Download,
+  FlaskConical,
 } from 'lucide-react';
 
 const fetcher = async (url: string) => {
@@ -72,6 +73,7 @@ export default function SignalsPage() {
   const [isExporting, setIsExporting] = useState(false);
   const [isLogsOpen, setIsLogsOpen] = useState(false);
   const [actionMessage, setActionMessage] = useState('');
+  const [shadowTestingIds, setShadowTestingIds] = useState<Record<string, 'loading' | 'done' | 'error'>>({}); 
   const { data: assets } = useSWR<any[]>('/api/assets', fetcher, { refreshInterval: 30000 });
 
   // Fetch signals from API
@@ -192,6 +194,30 @@ export default function SignalsPage() {
       setActionMessage(err instanceof Error ? err.message : 'Export failed');
     } finally {
       setIsExporting(false);
+    }
+  };
+
+  const triggerShadowTest = async (signalId: string) => {
+    setShadowTestingIds(prev => ({ ...prev, [signalId]: 'loading' }));
+    try {
+      const res = await fetch(`/api/signals/${signalId}/paper-test`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to create shadow trade');
+      }
+      setShadowTestingIds(prev => ({ ...prev, [signalId]: 'done' }));
+    } catch (err) {
+      console.error('Shadow trade failed:', err);
+      setShadowTestingIds(prev => ({ ...prev, [signalId]: 'error' }));
+      setActionMessage(err instanceof Error ? err.message : 'Shadow trade failed');
+      // Reset error state after 3s so user can retry
+      setTimeout(() => {
+        setShadowTestingIds(prev => {
+          const next = { ...prev };
+          if (next[signalId] === 'error') delete next[signalId];
+          return next;
+        });
+      }, 3000);
     }
   };
 
@@ -430,9 +456,46 @@ export default function SignalsPage() {
 
                   {riskVerdict === 'BLOCKED' && signal.riskAssessment?.reasons?.length > 0 && (
                     <div className="mt-3 p-3 rounded-md bg-red-500/10 border border-red-500/20">
-                      <span className="text-xs font-bold text-red-400 uppercase tracking-wider mb-1 block flex items-center gap-1">
-                        <AlertTriangle className="w-3.5 h-3.5" /> Blocked by Risk Engine
-                      </span>
+                      <div className="flex items-center justify-between gap-2 mb-1">
+                        <span className="text-xs font-bold text-red-400 uppercase tracking-wider flex items-center gap-1">
+                          <AlertTriangle className="w-3.5 h-3.5" /> Blocked by Risk Engine
+                        </span>
+                        {signal.side !== 'HOLD' && (
+                          <button
+                            onClick={() => triggerShadowTest(signal.id)}
+                            disabled={shadowTestingIds[signal.id] === 'loading' || shadowTestingIds[signal.id] === 'done'}
+                            className="kx-btn px-3 py-1.5 text-[11px] font-semibold rounded-md flex items-center gap-1.5 transition-all duration-200 hover:scale-[1.03]"
+                            style={{
+                              background: shadowTestingIds[signal.id] === 'done'
+                                ? 'rgba(0,212,170,0.12)'
+                                : shadowTestingIds[signal.id] === 'error'
+                                ? 'rgba(255,71,87,0.12)'
+                                : 'rgba(245,158,11,0.12)',
+                              color: shadowTestingIds[signal.id] === 'done'
+                                ? 'var(--kx-success)'
+                                : shadowTestingIds[signal.id] === 'error'
+                                ? 'var(--kx-short)'
+                                : '#f59e0b',
+                              opacity: shadowTestingIds[signal.id] === 'loading' ? 0.7 : 1,
+                              cursor: shadowTestingIds[signal.id] === 'done' ? 'default' : undefined,
+                            }}
+                            title="Create a shadow paper trade to track if this blocked signal would have been profitable"
+                          >
+                            {shadowTestingIds[signal.id] === 'loading' ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            ) : shadowTestingIds[signal.id] === 'done' ? (
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                            ) : (
+                              <FlaskConical className="w-3.5 h-3.5" />
+                            )}
+                            {shadowTestingIds[signal.id] === 'done'
+                              ? 'Shadow Trade Created ✓'
+                              : shadowTestingIds[signal.id] === 'error'
+                              ? 'Failed — Retry'
+                              : 'Test in Paper Trading'}
+                          </button>
+                        )}
+                      </div>
                       <ul className="list-disc pl-5 space-y-1 text-xs text-red-300/90 mt-2">
                         {signal.riskAssessment.reasons.map((reason: string, idx: number) => (
                           <li key={idx}>{reason}</li>

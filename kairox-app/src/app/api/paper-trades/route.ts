@@ -126,6 +126,7 @@ export async function GET(request: Request) {
         openedAt:    order.openedAt  ? new Date(order.openedAt)  : null,
         closedAt:    order.closedAt  ? new Date(order.closedAt)  : null,
         riskVerdict,
+        source:      order.source ?? null,
       };
     }));
 

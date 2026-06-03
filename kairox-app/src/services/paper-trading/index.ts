@@ -431,6 +431,68 @@ export class PaperTradingService {
   }
 
   /**
+   * Creates a PENDING paper order from a BLOCKED signal for shadow testing.
+   * Tracks the trade through the same lifecycle as approved trades so you can
+   * compare outcomes and validate risk engine accuracy.
+   * Does NOT change the signal's status — it remains BLOCKED.
+   */
+  async executeShadowTrade(signalId: string, quantity: number) {
+    const db  = await getDb();
+    const sig = await db.collection('signals').findOne({ _id: new ObjectId(signalId) });
+
+    if (!sig) throw new Error('Signal not found');
+
+    // Prevent duplicate shadow trades for the same signal
+    const existing = await db.collection('paperOrders').findOne({
+      signalId,
+      source: 'SHADOW_TEST',
+    });
+    if (existing) {
+      throw new Error('Shadow trade already exists for this signal');
+    }
+
+    const entryFee = calcFee(Number(sig.entry), quantity);
+
+    const orderData = {
+      signalId,
+      symbol:             sig.symbol,
+      side:               sig.side,
+      entryPrice:         sig.entry,
+      stopLoss:           sig.stopLoss,
+      quantity,
+      remainingQty:       quantity,
+      targets:            Array.isArray(sig.targets) ? sig.targets : [],
+      // Tracking fields
+      tp1Hit:             false,
+      tp2Hit:             false,
+      tp3Hit:             false,
+      breakEvenMoved:     false,
+      trailingStopActive: false,
+      highWaterMark:      Number(sig.entry),
+      entryFee,
+      feesTotal:          entryFee,
+      realizedPnl:        0,
+      partialExits:       [],
+      status:             'PENDING',
+      source:             'SHADOW_TEST',
+      openedAt:           new Date(),
+    };
+
+    const result = await db.collection('paperOrders').insertOne(orderData);
+    console.log(`[Paper Trade] Shadow test ${result.insertedId} created for BLOCKED signal ${signalId} — PENDING at $${sig.entry}`);
+
+    // Subscribe to market data so live ticks are processed
+    try {
+      const { marketDataService } = await import('../market-data');
+      marketDataService.subscribeSymbol(sig.symbol);
+    } catch (err) {
+      console.error(`[Paper Trade] Failed to subscribe WS for shadow test ${sig.symbol}:`, err);
+    }
+
+    return { id: result.insertedId.toString(), ...orderData };
+  }
+
+  /**
    * Manually closes the remaining open position at the current market price.
    * Deducts taker fee on exit and appends to partialExits log.
    */
