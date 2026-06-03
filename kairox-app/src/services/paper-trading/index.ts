@@ -432,8 +432,8 @@ export class PaperTradingService {
 
   /**
    * Creates a PENDING paper order from a BLOCKED signal for shadow testing.
-   * Tracks the trade through the same lifecycle as approved trades so you can
-   * compare outcomes and validate risk engine accuracy.
+   * Waits for market to reach the signal's exact entry price before activating,
+   * just like approved trades. Entry price is locked and never overwritten.
    * Does NOT change the signal's status — it remains BLOCKED.
    */
   async executeShadowTrade(signalId: string, quantity: number) {
@@ -451,13 +451,14 @@ export class PaperTradingService {
       throw new Error('Shadow trade already exists for this signal');
     }
 
-    const entryFee = calcFee(Number(sig.entry), quantity);
+    const entryPrice = Number(sig.entry);
+    const entryFee = calcFee(entryPrice, quantity);
 
     const orderData = {
       signalId,
       symbol:             sig.symbol,
       side:               sig.side,
-      entryPrice:         sig.entry,
+      entryPrice,
       stopLoss:           sig.stopLoss,
       quantity,
       remainingQty:       quantity,
@@ -468,7 +469,7 @@ export class PaperTradingService {
       tp3Hit:             false,
       breakEvenMoved:     false,
       trailingStopActive: false,
-      highWaterMark:      Number(sig.entry),
+      highWaterMark:      entryPrice,
       entryFee,
       feesTotal:          entryFee,
       realizedPnl:        0,
@@ -479,7 +480,7 @@ export class PaperTradingService {
     };
 
     const result = await db.collection('paperOrders').insertOne(orderData);
-    console.log(`[Paper Trade] Shadow test ${result.insertedId} created for BLOCKED signal ${signalId} — PENDING at $${sig.entry}`);
+    console.log(`[Paper Trade] Shadow test ${result.insertedId} PENDING for BLOCKED signal ${signalId} at entry $${entryPrice}`);
 
     // Subscribe to market data so live ticks are processed
     try {
@@ -558,7 +559,9 @@ export class PaperTradingService {
   }
 
   /**
-   * Manually activates a pending order immediately at the current live market price.
+   * Manually activates a pending order.
+   * For shadow test orders: activates at the original signal entry price (never overridden).
+   * For regular orders: activates at the current live market price.
    */
   async startOrderNow(orderId: string) {
     const db = await getDb();
@@ -571,39 +574,48 @@ export class PaperTradingService {
       throw new Error('Order is not in PENDING status');
     }
 
-    const { marketDataService } = await import('../market-data');
-    const priceRaw = await marketDataService.getLatestPrice(order.symbol);
-    if (!priceRaw) {
-      throw new Error(`No live price for ${order.symbol}`);
+    const isShadowTest = order.source === 'SHADOW_TEST';
+    const qty = Number(order.remainingQty ?? order.quantity);
+    const now = new Date();
+
+    let fillPrice: number;
+
+    if (isShadowTest) {
+      // Shadow tests always fill at the signal's original entry price
+      fillPrice = Number(order.entryPrice);
+    } else {
+      const { marketDataService } = await import('../market-data');
+      const priceRaw = await marketDataService.getLatestPrice(order.symbol);
+      if (!priceRaw) {
+        throw new Error(`No live price for ${order.symbol}`);
+      }
+      fillPrice = Number(priceRaw);
     }
 
-    const currentPrice = Number(priceRaw);
-    const qty = Number(order.remainingQty ?? order.quantity);
-    const entryFee = calcFee(currentPrice, qty);
-    const now = new Date();
+    const entryFee = calcFee(fillPrice, qty);
 
     await db.collection('paperOrders').updateOne(
       { _id: new ObjectId(orderId) },
       {
         $set: {
           status: 'OPEN',
-          entryPrice: currentPrice,
+          entryPrice: fillPrice,
           openedAt: now,
           entryFee,
           feesTotal: entryFee,
-          highWaterMark: currentPrice,
+          highWaterMark: fillPrice,
         }
       }
     );
 
-    console.log(`[Paper Trade] Manual start: ${orderId} activated at market price $${currentPrice}`);
+    console.log(`[Paper Trade] Manual start: ${orderId} activated at ${isShadowTest ? 'signal entry' : 'market'} price $${fillPrice}`);
 
     await alertQueue.add('send-telegram', {
       signalId: order.signalId,
-      message: `🚀 TRADE ACTIVATED MANUALLY: ${order.symbol}\n\nSide: ${order.side}\nEntry: $${fmt(currentPrice)}\nSize: ${qty} units\nSL: $${fmt(order.stopLoss)}\nFee: $${fmt(entryFee)}`,
+      message: `🚀 TRADE ACTIVATED${isShadowTest ? ' (SHADOW TEST)' : ' MANUALLY'}: ${order.symbol}\n\nSide: ${order.side}\nEntry: $${fmt(fillPrice)}\nSize: ${qty} units\nSL: $${fmt(order.stopLoss)}\nFee: $${fmt(entryFee)}`,
     });
 
-    return { success: true, fillPrice: currentPrice };
+    return { success: true, fillPrice };
   }
 
   /**
