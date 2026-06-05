@@ -12,6 +12,7 @@ const envSchema = z.object({
   // Auth
   AUTH_SECRET: z.string().min(16),
   NEXTAUTH_URL: z.string().url().optional(),
+  AUTH_TRUST_HOST: z.string().optional(),
 
   // AI APIs
   OPENROUTER_API_KEY: z.string().optional(),

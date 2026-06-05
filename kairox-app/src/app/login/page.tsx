@@ -2,7 +2,6 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { motion } from 'framer-motion';
 import { Eye, EyeOff, TrendingUp, Shield, Zap } from 'lucide-react';
 
 export default function LoginPage() {
@@ -77,12 +76,7 @@ export default function LoginPage() {
         <div className="absolute bottom-1/4 right-1/4 w-64 h-64 rounded-full opacity-15"
              style={{ background: 'radial-gradient(circle, #00d4aa 0%, transparent 70%)', filter: 'blur(50px)' }} />
 
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.8, delay: 0.2 }}
-          className="relative z-10 px-16 max-w-lg"
-        >
+        <div className="relative z-10 px-16 max-w-lg kx-fade-in">
           <div className="flex items-center gap-3 mb-8">
             <div className="w-12 h-12 rounded-xl flex items-center justify-center"
                  style={{ background: 'linear-gradient(135deg, #3b82f6, #00d4aa)' }}>
@@ -103,12 +97,10 @@ export default function LoginPage() {
               { icon: Shield, title: 'Risk Engine', desc: '8-point deterministic safety verification' },
               { icon: TrendingUp, title: 'Paper Trading', desc: 'Validate strategies before going live' },
             ].map((feature, i) => (
-              <motion.div
+              <div
                 key={feature.title}
-                initial={{ opacity: 0, x: -20 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ duration: 0.5, delay: 0.4 + i * 0.15 }}
-                className="flex items-start gap-4"
+                className="flex items-start gap-4 kx-fade-in"
+                style={{ animationDelay: `${0.2 + i * 0.1}s` }}
               >
                 <div className="w-10 h-10 rounded-lg flex items-center justify-center shrink-0"
                      style={{ background: 'rgba(59, 130, 246, 0.15)' }}>
@@ -118,20 +110,15 @@ export default function LoginPage() {
                   <h3 className="font-semibold text-sm" style={{ color: 'var(--kx-text-primary)' }}>{feature.title}</h3>
                   <p className="text-sm" style={{ color: 'var(--kx-text-muted)' }}>{feature.desc}</p>
                 </div>
-              </motion.div>
+              </div>
             ))}
           </div>
-        </motion.div>
+        </div>
       </div>
 
       {/* Right Panel - Auth Form */}
       <div className="w-full lg:w-1/2 flex items-center justify-center px-6 py-12">
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5 }}
-          className="w-full max-w-md"
-        >
+        <div className="w-full max-w-md kx-fade-in" style={{ animationDelay: '0.1s' }}>
           {/* Mobile logo */}
           <div className="flex items-center gap-3 mb-8 lg:hidden">
             <div className="w-10 h-10 rounded-xl flex items-center justify-center"
@@ -149,14 +136,12 @@ export default function LoginPage() {
           </p>
 
           {error && (
-            <motion.div
-              initial={{ opacity: 0, y: -10 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="mb-6 p-3 rounded-lg text-sm"
+            <div
+              className="mb-6 p-3 rounded-lg text-sm kx-fade-in"
               style={{ background: 'rgba(239, 68, 68, 0.12)', color: 'var(--kx-danger)', border: '1px solid rgba(239, 68, 68, 0.3)' }}
             >
               {error}
-            </motion.div>
+            </div>
           )}
 
           <form onSubmit={handleSubmit} className="space-y-5">
@@ -265,7 +250,7 @@ export default function LoginPage() {
           <p className="mt-8 text-xs text-center" style={{ color: 'var(--kx-text-muted)' }}>
             Trading signals are for informational purposes only. Past performance does not guarantee future results.
           </p>
-        </motion.div>
+        </div>
       </div>
     </div>
   );
