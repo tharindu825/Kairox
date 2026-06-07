@@ -23,9 +23,17 @@ export async function POST(
       return NextResponse.json({ error: 'Signal not found' }, { status: 404 });
     }
 
-    if (signal.status !== 'BLOCKED') {
+    // Fetch votes to determine model agreement
+    const votes = await db.collection('signalVotes').find({ signalId: id }).toArray();
+    const primaryVote = votes.find(v => v.role === 'PRIMARY')?.side || 'HOLD';
+    const confVote = votes.find(v => v.role === 'CONFIRMATION')?.side || 'HOLD';
+    const isAgreement = primaryVote === confVote;
+
+    const isEligible = signal.status === 'BLOCKED' || (signal.status === 'APPROVED' && !isAgreement);
+
+    if (!isEligible) {
       return NextResponse.json(
-        { error: `Only BLOCKED signals can be shadow-tested. This signal is ${signal.status}.` },
+        { error: 'Only BLOCKED signals or APPROVED signals with model disagreement can be shadow-tested.' },
         { status: 400 }
       );
     }

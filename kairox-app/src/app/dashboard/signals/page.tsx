@@ -503,6 +503,54 @@ export default function SignalsPage() {
                       </ul>
                     </div>
                   )}
+
+                  {riskVerdict !== 'BLOCKED' && !agreement && (
+                    <div className="mt-3 p-3 rounded-md bg-yellow-500/10 border border-yellow-500/20">
+                      <div className="flex items-center justify-between gap-2 mb-1">
+                        <span className="text-xs font-bold text-yellow-400 uppercase tracking-wider flex items-center gap-1">
+                          <AlertTriangle className="w-3.5 h-3.5" /> Model Disagreement (Not Auto-Traded)
+                        </span>
+                        {signal.side !== 'HOLD' && (
+                          <button
+                            onClick={() => triggerShadowTest(signal.id)}
+                            disabled={shadowTestingIds[signal.id] === 'loading' || shadowTestingIds[signal.id] === 'done'}
+                            className="kx-btn px-3 py-1.5 text-[11px] font-semibold rounded-md flex items-center gap-1.5 transition-all duration-200 hover:scale-[1.03]"
+                            style={{
+                              background: shadowTestingIds[signal.id] === 'done'
+                                ? 'rgba(0,212,170,0.12)'
+                                : shadowTestingIds[signal.id] === 'error'
+                                ? 'rgba(255,71,87,0.12)'
+                                : 'rgba(245,158,11,0.12)',
+                              color: shadowTestingIds[signal.id] === 'done'
+                                ? 'var(--kx-success)'
+                                : shadowTestingIds[signal.id] === 'error'
+                                ? 'var(--kx-short)'
+                                : '#f59e0b',
+                              opacity: shadowTestingIds[signal.id] === 'loading' ? 0.7 : 1,
+                              cursor: shadowTestingIds[signal.id] === 'done' ? 'default' : undefined,
+                            }}
+                            title="Create a shadow paper trade to track if this disagreed signal would have been profitable"
+                          >
+                            {shadowTestingIds[signal.id] === 'loading' ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            ) : shadowTestingIds[signal.id] === 'done' ? (
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                            ) : (
+                              <FlaskConical className="w-3.5 h-3.5" />
+                            )}
+                            {shadowTestingIds[signal.id] === 'done'
+                              ? 'Shadow Trade Created ✓'
+                              : shadowTestingIds[signal.id] === 'error'
+                              ? 'Failed — Retry'
+                              : 'Test in Paper Trading'}
+                          </button>
+                        )}
+                      </div>
+                      <p className="text-xs text-yellow-300/90 mt-1">
+                        Primary model suggested <span className="font-semibold">{primaryVote}</span> while confirmation model suggested <span className="font-semibold">{confVote}</span>.
+                      </p>
+                    </div>
+                  )}
                 </div>
 
                 <div className="flex lg:flex-col items-center gap-4 lg:gap-3 shrink-0">
