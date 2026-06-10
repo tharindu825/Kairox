@@ -100,7 +100,10 @@ export class PaperTradingService {
     }
 
     const entry = new Decimal(order.entryPrice);
-    const entryTriggered = entry.greaterThanOrEqualTo(candle.low) && entry.lessThanOrEqualTo(candle.high);
+    const side = order.side as 'LONG' | 'SHORT';
+    const entryTriggered = side === 'LONG'
+      ? entry.greaterThanOrEqualTo(candle.low)
+      : entry.lessThanOrEqualTo(candle.high);
 
     if (entryTriggered) {
       const qty = Number(order.remainingQty ?? order.quantity);
@@ -389,13 +392,35 @@ export class PaperTradingService {
 
     if (!sig || sig.status !== 'APPROVED') return;
 
-    const entryFee = calcFee(Number(sig.entry), quantity);
+    // Fetch the latest price to see if we can fill immediately at a better or equal price
+    let fillPrice = Number(sig.entry);
+    let status = 'PENDING';
+    let openedAt = new Date();
+
+    try {
+      const { marketDataService } = await import('../market-data');
+      const latestPrice = await marketDataService.getLatestPrice(sig.symbol);
+      if (latestPrice !== null) {
+        const side = sig.side as 'LONG' | 'SHORT';
+        const isBetterOrEqual = side === 'LONG' ? latestPrice <= fillPrice : latestPrice >= fillPrice;
+        if (isBetterOrEqual) {
+          status = 'OPEN';
+          fillPrice = latestPrice;
+          openedAt = new Date();
+          console.log(`[Paper Trade] Signal ${signalId} immediately filled at market price $${fillPrice} (better/equal than entry limit $${sig.entry})`);
+        }
+      }
+    } catch (err) {
+      console.error(`[Paper Trade] Failed to get latest price for immediate fill check:`, err);
+    }
+
+    const entryFee = calcFee(fillPrice, quantity);
 
     const orderData = {
       signalId,
       symbol:             sig.symbol,
       side:               sig.side,
-      entryPrice:         sig.entry,
+      entryPrice:         fillPrice,
       stopLoss:           sig.stopLoss,
       quantity,
       remainingQty:       quantity,
@@ -407,17 +432,17 @@ export class PaperTradingService {
       tp3Hit:             false,
       breakEvenMoved:     false,
       trailingStopActive: false,
-      highWaterMark:      Number(sig.entry),
+      highWaterMark:      fillPrice,
       entryFee,
       feesTotal:          entryFee,
       realizedPnl:        0,
       partialExits:       [],
-      status:             'PENDING',
-      openedAt:           new Date(),
+      status,
+      openedAt,
     };
 
     const result = await db.collection('paperOrders').insertOne(orderData);
-    console.log(`[Paper Trade] Order ${result.insertedId} created for signal ${signalId} — PENDING at $${sig.entry} (entry fee $${round4(entryFee)})`);
+    console.log(`[Paper Trade] Order ${result.insertedId} created for signal ${signalId} — ${status} at $${fillPrice} (entry fee $${round4(entryFee)})`);
 
     // Dynamically subscribe to the symbol's market data stream so Kairox starts receiving live candle ticks
     try {
@@ -451,14 +476,35 @@ export class PaperTradingService {
       throw new Error('Shadow trade already exists for this signal');
     }
 
-    const entryPrice = Number(sig.entry);
-    const entryFee = calcFee(entryPrice, quantity);
+    // Fetch the latest price to see if we can fill immediately at a better or equal price
+    let fillPrice = Number(sig.entry);
+    let status = 'PENDING';
+    let openedAt = new Date();
+
+    try {
+      const { marketDataService } = await import('../market-data');
+      const latestPrice = await marketDataService.getLatestPrice(sig.symbol);
+      if (latestPrice !== null) {
+        const side = sig.side as 'LONG' | 'SHORT';
+        const isBetterOrEqual = side === 'LONG' ? latestPrice <= fillPrice : latestPrice >= fillPrice;
+        if (isBetterOrEqual) {
+          status = 'OPEN';
+          fillPrice = latestPrice;
+          openedAt = new Date();
+          console.log(`[Paper Trade] Shadow trade for signal ${signalId} immediately filled at market price $${fillPrice} (better/equal than entry limit $${sig.entry})`);
+        }
+      }
+    } catch (err) {
+      console.error(`[Paper Trade] Failed to get latest price for shadow trade immediate fill check:`, err);
+    }
+
+    const entryFee = calcFee(fillPrice, quantity);
 
     const orderData = {
       signalId,
       symbol:             sig.symbol,
       side:               sig.side,
-      entryPrice,
+      entryPrice:         fillPrice,
       stopLoss:           sig.stopLoss,
       quantity,
       remainingQty:       quantity,
@@ -469,18 +515,18 @@ export class PaperTradingService {
       tp3Hit:             false,
       breakEvenMoved:     false,
       trailingStopActive: false,
-      highWaterMark:      entryPrice,
+      highWaterMark:      fillPrice,
       entryFee,
       feesTotal:          entryFee,
       realizedPnl:        0,
       partialExits:       [],
-      status:             'PENDING',
+      status,
       source:             'SHADOW_TEST',
-      openedAt:           new Date(),
+      openedAt,
     };
 
     const result = await db.collection('paperOrders').insertOne(orderData);
-    console.log(`[Paper Trade] Shadow test ${result.insertedId} PENDING for BLOCKED signal ${signalId} at entry $${entryPrice}`);
+    console.log(`[Paper Trade] Shadow test ${result.insertedId} ${status} for BLOCKED signal ${signalId} at price $${fillPrice}`);
 
     // Subscribe to market data so live ticks are processed
     try {

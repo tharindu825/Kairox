@@ -5,7 +5,7 @@ import { ObjectId } from 'mongodb';
 import { Logger } from '@/lib/logger';
 import { indicatorService, FeatureBundle } from '@/services/indicators';
 import { openRouterService, openRouterConfirmationService } from '@/services/ai/openrouter-service';
-import { riskEngine, PortfolioState } from '@/services/risk-engine';
+import { riskEngine, RiskEngine, PortfolioState } from '@/services/risk-engine';
 import { paperTradingService } from '@/services/paper-trading';
 import { alertQueue } from './queues';
 import { NormalizedCandle } from '@/services/market-data/binance';
@@ -200,7 +200,17 @@ export const signalWorker = new Worker(
       const portfolio = await getPortfolioState();
 
       // 5. Risk Engine Validation (always use Primary signal metrics for risk calc)
-      const riskAssessment = riskEngine.assess(primarySignal, portfolio, candle.symbol);
+      const policyDoc = await db.collection('strategyPolicy').findOne({ isActive: true });
+      const customRiskEngine = policyDoc ? new RiskEngine({
+        maxRiskPercent: policyDoc.maxRiskPercent,
+        maxOpenTrades: policyDoc.maxOpenTrades,
+        maxCorrelated: policyDoc.maxCorrelated,
+        minRewardRisk: policyDoc.minRewardRisk,
+        dailyDrawdownLimit: policyDoc.dailyDrawdownLimit,
+        cooldownMinutes: policyDoc.cooldownMinutes,
+      }) : riskEngine;
+
+      const riskAssessment = customRiskEngine.assess(primarySignal, portfolio, candle.symbol);
 
       // Force BLOCKED if models disagree completely (e.g. LONG vs SHORT)
       if (primarySignal.side !== 'HOLD' && confSignal.side !== 'HOLD' && !isAgreement) {
