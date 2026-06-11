@@ -74,7 +74,7 @@ export class OpenRouterService {
       return this.getMockResult(symbol);
     }
 
-    const systemPrompt = this.buildSystemPrompt();
+    const systemPrompt = this.buildSystemPrompt(timeframe);
     const userPrompt = this.buildUserPrompt(symbol, timeframe, features);
 
     // Try primary model, then fallback
@@ -119,8 +119,8 @@ export class OpenRouterService {
               type: 'json_schema',
               json_schema: SIGNAL_JSON_SCHEMA,
             },
-            temperature: 0.3,
-            max_tokens: 2000,
+            temperature: 0.1, // Lowered from 0.3 for more consistent, deterministic analysis
+            max_tokens: 2500, // Increased from 2000 to accommodate richer reasoning with SMC/EW
           }),
         });
 
@@ -163,35 +163,61 @@ export class OpenRouterService {
     throw new Error('Exhausted retries');
   }
 
-  private buildSystemPrompt(): string {
+  // ── System Prompts ──────────────────────────────────────────────────────────
+
+  private buildSystemPrompt(timeframe: string): string {
     if (this.role === 'CONFIRMATION') {
       return `You are a Senior Quantitative Analyst providing confirmation analysis for the Kairox Trading Platform. 
-Your role is to independently verify signals. Be critical but balanced—do not reject high-accuracy, actionable setups over minor technical divergences if the overall price structure and localized confluence strongly support the primary signal's direction.
+Your role is to independently verify signals using a structured analysis framework. Be critical but balanced—do not reject high-accuracy, actionable setups over minor technical divergences if the overall price structure and localized confluence strongly support the primary signal's direction.
+
+STRUCTURED ANALYSIS FRAMEWORK — Evaluate in this order:
+1. MARKET STRUCTURE: Analyze BOS/CHoCH, swing highs/lows, and trend direction from the Smart Money data provided.
+2. TREND DIRECTION: Verify EMA stack alignment and price position.
+3. MOMENTUM: Check RSI, Stochastic RSI, MACD, and ADX confluence.
+4. SMART MONEY CONCEPTS: Evaluate order blocks, fair value gaps, liquidity zones, and premium/discount context.
+5. ELLIOTT WAVE: If a wave count is provided, consider the wave phase in your confirmation.
+6. VOLUME: Confirm volume supports the trade direction.
+7. FINAL DECISION: Confirm or reject based on overall confluence.
 
 RULES:
-1. INDEPENDENT ANALYSIS: Independently evaluate technical confluence and price action.
-2. CONSTRUCTIVE ACCURACY: Confirm the trade if the primary setup has high-probability support (e.g. key horizontal support/resistance, RSI divergence, outer Bollinger Band bounce, or EMA alignment).
-3. REDUCED HOLD BIAS: Do not default to "HOLD" if the primary signal aligns with a clear local breakout, support test, or high-probability continuation setup. Reject or suggest "HOLD" only if the setup poses excessive risk or complete structural contradiction.
-4. CONFIDENCE: 0.7+ indicates actionable, high-probability setups.
+1. INDEPENDENT ANALYSIS: Independently evaluate technical confluence, price action, and Smart Money structures.
+2. CONSTRUCTIVE ACCURACY: Confirm the trade if the primary setup has high-probability support (e.g. key order block, BOS confirmation, RSI divergence, FVG retest, or EMA alignment).
+3. REDUCED HOLD BIAS: Do not default to "HOLD" if the primary signal aligns with a clear BOS breakout, order block retest, or high-probability continuation setup. Reject or suggest "HOLD" only if the setup poses excessive risk or complete structural contradiction.
+4. CONFIDENCE: 0.65+ indicates actionable, high-probability setups. Below 0.65 MUST be "HOLD".
 5. Invalidation must be a precise price point or technical event.
 6. VOLUME & ATR VALIDATION: Independently verify that volume supports the trade direction (avoid LOW volume breakouts) and that the stop loss is at least 1.5x ATR from entry. Penalize entries that are more than 0.3% from the current price.
-7. RESPOND ONLY WITH JSON.`;
+7. SMC VALIDATION: If the signal aligns with an unmitigated order block or unfilled FVG, increase confidence. If the trade is counter to structure (CHoCH detected), flag it.
+8. RESPOND ONLY WITH JSON.`;
     }
 
-    return `You are a Senior Quantitative Trader and Risk Manager at Kairox AI. 
-Your goal is to provide HIGH-ACCURACY trading signals for the 4-hour (4h) timeframe.
+    return `You are a Senior Quantitative Trader and Risk Manager at Kairox AI.
+Your goal is to provide HIGH-ACCURACY trading signals for the ${timeframe} timeframe using a multi-layered analysis framework combining traditional technical analysis, Smart Money Concepts (SMC), and Elliott Wave Theory.
+
+STRUCTURED ANALYSIS FRAMEWORK — You MUST analyze in this exact order:
+1. MARKET STRUCTURE (SMC): Identify BOS/CHoCH, trend direction from swing highs/lows. Is the market making higher highs & higher lows (bullish) or lower highs & lower lows (bearish)?
+2. KEY LEVELS (SMC): Identify nearest order blocks, unfilled fair value gaps, and liquidity zones from the SMC data provided. These are your primary support/resistance levels.
+3. TREND & MOMENTUM: Verify with EMA stack (20/50/200), ADX strength, RSI, Stochastic RSI, and MACD.
+4. ELLIOTT WAVE: If a wave count is provided, identify which wave we're in and use Fibonacci projections for targets.
+5. VOLUME: Confirm volume supports the trade direction.
+6. PREMIUM/DISCOUNT: Only enter LONGs in the discount zone and SHORTs in the premium zone (unless extreme momentum breakout).
+7. RISK ASSESSMENT: Calculate ATR-based stops and R:R ratio.
+8. FINAL DECISION: Only generate a signal if 4+ factors align.
 
 CRITICAL TRADING RULES:
-1. TREND ALIGNMENT: Prefer LONG if Price > EMA200, and SHORT if Price < EMA200. However, do NOT automatically block high-accuracy pullback or reversal setups if there is an extraordinary local confluence (e.g., bounce off a strong horizontal support/resistance zone, bullish/bearish RSI divergence, or a clear candlestick reversal pattern).
-2. OVEREXTENDED MARKETS: Do NOT suggest LONG if RSI > 70. Do NOT suggest SHORT if RSI < 30. This avoids missing high-accuracy momentum continuations in strong trends.
-3. MOMENTUM: Verify MACD momentum. MACD histogram should ideally be increasing for LONGs and decreasing for SHORTs, but minor counter-momentum is acceptable if structural support or a trend reversal pattern has been fully validated with high confidence.
-4. CONSERVATIVE R:R: Minimum 1.5:1 Reward-to-Risk ratio is REQUIRED. Any signal below 1.5 R:R to TP1 will be automatically blocked.
-5. SIDEWAYS & RANGE MARKETS: Do not default to "HOLD" merely because the market is consolidating sideways. Formulate high-accuracy range-bound or swing trades if clear boundaries, key horizontal support/resistance levels, or Bollinger Band bounces are well-defined.
-6. ACCURACY & CONFIDENCE: Accuracy is your primary metric. A signal with < 0.7 confidence MUST be a "HOLD". Assign 0.70+ confidence ONLY to high-conviction, high-accuracy setups where multiple technical indicators and price structures fully align.
-7. STOP LOSS: Use ATR-based stops. Place the stop loss at a minimum of 1.5x ATR from entry but no more than 3x ATR. Stops that are too tight get hit by noise; stops that are too wide have poor R:R.
-8. ACTIONABLE ENTRY: Your recommended entry price MUST be within 0.3% of the CURRENT PRICE. Do NOT suggest deep pullback entries that are unlikely to trigger — this wastes capital in pending orders. Nearly half of recent signals expired without filling because the entry was too far away.
-9. VOLUME CONFIRMATION: Consider the volume profile. Avoid taking trades during LOW or DECLINING volume periods unless there is overwhelming structural confluence. Prefer ELEVATED or SPIKE volume for breakout entries.
-10. RESPOND ONLY WITH JSON matching the schema precisely.
+1. TREND ALIGNMENT: Prefer LONG if Price > EMA200 and market structure is BULLISH (higher highs/lows). Prefer SHORT if Price < EMA200 and structure is BEARISH. Counter-trend setups require a confirmed CHoCH + order block confluence + confidence >= 0.80.
+2. OVEREXTENDED MARKETS: Do NOT suggest LONG if RSI > 70 or StochRSI %K > 80. Do NOT suggest SHORT if RSI < 30 or StochRSI %K < 20.
+3. TREND STRENGTH: If ADX < 20, the market is ranging — only take range-bound trades at key order blocks or BB extremes. If ADX > 25, follow the trend.
+4. MOMENTUM: Verify MACD histogram alignment with trade direction. For LONGs, histogram should be positive or turning positive. For SHORTs, negative or turning negative.
+5. ORDER BLOCKS: Prioritize entries at unmitigated order blocks. A LONG entry near a bullish OB has much higher probability. A SHORT entry near a bearish OB likewise.
+6. FAIR VALUE GAPS: Use unfilled FVGs as entry zones and targets. Price tends to revisit and fill these gaps.
+7. LIQUIDITY ZONES: Be aware of equal highs/lows clusters — smart money often sweeps these before reversing. If price is approaching a liquidity zone, wait for the sweep.
+8. CONSERVATIVE R:R: Minimum 1.5:1 Reward-to-Risk ratio is REQUIRED. Use Elliott Wave projected targets when available.
+9. ACCURACY & CONFIDENCE: Accuracy is your primary metric. A signal with < 0.65 confidence MUST be a "HOLD". Assign 0.65+ confidence ONLY to setups where structure, momentum, and key levels align.
+10. STOP LOSS: Use ATR-based stops. Place the stop loss at a minimum of 1.5x ATR from entry but no more than 3x ATR. Prefer placing stops below/above key order blocks.
+11. ACTIONABLE ENTRY: Entry price MUST be within 0.3% of the CURRENT PRICE. Do NOT suggest deep pullback entries.
+12. VOLUME CONFIRMATION: Avoid trades during LOW or DECLINING volume unless there is overwhelming SMC confluence (order block + BOS + FVG alignment).
+13. ELLIOTT WAVE TARGETS: If a wave count is detected with confidence > 50%, use the projected Fibonacci target for TP placement and the invalidation level for stop-loss reference.
+14. RESPOND ONLY WITH JSON matching the schema precisely.
 
 PRICE PRECISION RULES (CRITICAL):
 - Entry, Stop Loss, and Target prices MUST use proper decimal precision.
@@ -204,11 +230,77 @@ PRICE PRECISION RULES (CRITICAL):
 - The distance between entry and first target must be at least 1.5x the stopLoss distance.`;
   }
 
+  // ── User Prompt ─────────────────────────────────────────────────────────────
+
   private buildUserPrompt(symbol: string, timeframe: string, features: FeatureBundle): string {
-    // Determine appropriate decimal precision based on price level
-    const price = features.closePrice; // Use actual current close price
+    const price = features.closePrice;
     const pricePrecision = price >= 100 ? 2 : price >= 1 ? 4 : price >= 0.01 ? 5 : 6;
     const formatPrice = (p: number) => p.toFixed(pricePrecision);
+
+    // Build recent candles table
+    const candleTable = features.recentCandles.length > 0
+      ? features.recentCandles.map((c, i) =>
+          `  ${i + 1}. O:${formatPrice(c.o)} H:${formatPrice(c.h)} L:${formatPrice(c.l)} C:${formatPrice(c.c)} V:${c.v.toFixed(0)}`
+        ).join('\n')
+      : '  No recent candle data available';
+
+    // Build SMC section
+    let smcSection = 'SMART MONEY CONCEPTS:\n  No SMC data available';
+    if (features.smc) {
+      const smc = features.smc;
+      const smcLines: string[] = [];
+      smcLines.push(`  Structure: ${smc.structureTrend}`);
+      smcLines.push(`  Zone: ${smc.premiumDiscount}`);
+
+      if (smc.lastBOS) {
+        smcLines.push(`  Last BOS: ${smc.lastBOS.side} (${smc.lastBOS.candlesAgo} candles ago @ $${formatPrice(smc.lastBOS.price)})`);
+      }
+      if (smc.lastCHoCH) {
+        smcLines.push(`  ⚠️ CHoCH: ${smc.lastCHoCH.side} (${smc.lastCHoCH.candlesAgo} candles ago @ $${formatPrice(smc.lastCHoCH.price)})`);
+      }
+      if (smc.nearestOB) {
+        smcLines.push(`  Nearest Order Block: ${smc.nearestOB.type} @ $${formatPrice(smc.nearestOB.low)}-$${formatPrice(smc.nearestOB.high)} (${smc.nearestOB.distancePercent.toFixed(2)}% away)`);
+      }
+      if (smc.nearestFVG) {
+        smcLines.push(`  Nearest Unfilled FVG: ${smc.nearestFVG.type} @ $${formatPrice(smc.nearestFVG.lower)}-$${formatPrice(smc.nearestFVG.upper)} (${smc.nearestFVG.distancePercent.toFixed(2)}% away)`);
+      }
+      if (smc.orderBlocks.length > 0) {
+        smcLines.push(`  Active Order Blocks: ${smc.orderBlocks.length} (${smc.orderBlocks.map(ob => `${ob.type} $${formatPrice(ob.low)}-$${formatPrice(ob.high)}`).join(', ')})`);
+      }
+      if (smc.fairValueGaps.length > 0) {
+        smcLines.push(`  Unfilled FVGs: ${smc.fairValueGaps.length} (${smc.fairValueGaps.map(fvg => `${fvg.type} $${formatPrice(fvg.lower)}-$${formatPrice(fvg.upper)}`).join(', ')})`);
+      }
+      if (smc.liquidityZones.length > 0) {
+        const buyside = smc.liquidityZones.filter(z => z.type === 'BUYSIDE');
+        const sellside = smc.liquidityZones.filter(z => z.type === 'SELLSIDE');
+        if (buyside.length > 0) smcLines.push(`  Buyside Liquidity: ${buyside.map(z => `$${formatPrice(z.price)} (${z.touchCount}x)`).join(', ')}`);
+        if (sellside.length > 0) smcLines.push(`  Sellside Liquidity: ${sellside.map(z => `$${formatPrice(z.price)} (${z.touchCount}x)`).join(', ')}`);
+      }
+
+      smcSection = 'SMART MONEY CONCEPTS:\n' + smcLines.join('\n');
+    }
+
+    // Build Elliott Wave section
+    let ewSection = 'ELLIOTT WAVE:\n  No reliable wave pattern detected';
+    if (features.elliottWave && features.elliottWave.currentWave) {
+      const ew = features.elliottWave;
+      const wave = ew.currentWave!;
+      const ewLines: string[] = [];
+      ewLines.push(`  Pattern: ${wave.degree} ${wave.type} (${wave.direction})`);
+      ewLines.push(`  Current Wave: ${wave.number} (confidence: ${(wave.confidence * 100).toFixed(0)}%)`);
+
+      if (ew.waves.length > 0) {
+        const waveDesc = ew.waves.map(w =>
+          `W${w.number}: $${formatPrice(w.startPrice)}→$${formatPrice(w.endPrice)}${w.fibRatio ? ` (${(w.fibRatio * 100).toFixed(1)}%)` : ''}`
+        ).join(' | ');
+        ewLines.push(`  Waves: ${waveDesc}`);
+      }
+
+      if (ew.projectedTarget) ewLines.push(`  Projected Target: $${formatPrice(ew.projectedTarget)}`);
+      if (ew.invalidationLevel) ewLines.push(`  Invalidation: $${formatPrice(ew.invalidationLevel)}`);
+
+      ewSection = 'ELLIOTT WAVE:\n' + ewLines.join('\n');
+    }
 
     return `Analyze the following market data and generate a trading signal:
 
@@ -218,7 +310,9 @@ CURRENT PRICE: ${formatPrice(price)}
 
 TECHNICAL INDICATORS:
 - RSI(14): ${features.rsi.toFixed(2)}
+- Stochastic RSI: %K=${features.stochRsi.k.toFixed(2)} | %D=${features.stochRsi.d.toFixed(2)}
 - MACD: ${features.macd.macd.toFixed(6)} | Signal: ${features.macd.signal.toFixed(6)} | Histogram: ${features.macd.histogram.toFixed(6)}
+- ADX(14): ${features.adx.toFixed(2)} (${features.adx >= 25 ? 'TRENDING' : features.adx >= 20 ? 'WEAK TREND' : 'RANGING'})
 - ATR(14): ${features.atr.toFixed(6)}
 - EMA(20): ${formatPrice(features.ema20)}
 - EMA(50): ${formatPrice(features.ema50)}
@@ -228,6 +322,14 @@ TECHNICAL INDICATORS:
 MARKET CONTEXT:
 - Trend: ${features.trend}
 - Volume Profile: ${features.volumeProfile}
+- Volatility Regime: ${features.volatilityRegime}
+
+${smcSection}
+
+${ewSection}
+
+RECENT CANDLES (last ${features.recentCandles.length}, newest last):
+${candleTable}
 
 IMPORTANT: Use ${pricePrecision} decimal places for entry, stopLoss, and target prices. Entry, stopLoss, and targets MUST be different values — never round them to the same number.
 

@@ -117,12 +117,12 @@ export class RiskEngine {
       }
     }
 
-    // ─── 8. Confidence Check ────────────────────────────────────────────
-    if (signal.confidence < 0.40) {
-      reasons.push(`Low confidence: ${(signal.confidence * 100).toFixed(0)}%`);
+    // ─── 8. Confidence Check (aligned with AI prompt thresholds) ────────
+    if (signal.confidence < 0.50) {
+      reasons.push(`Low confidence: ${(signal.confidence * 100).toFixed(0)}% (below 50% threshold)`);
       verdict = this.escalateVerdict(verdict, 'WATCH_ONLY');
-    } else if (signal.confidence < 0.50) {
-      reasons.push(`Moderate confidence: ${(signal.confidence * 100).toFixed(0)}% — reduced size recommended`);
+    } else if (signal.confidence < 0.65) {
+      reasons.push(`Moderate confidence: ${(signal.confidence * 100).toFixed(0)}% (below 65% full-position threshold) — reduced size`);
       if (verdict === 'APPROVED') verdict = 'REDUCED';
     }
 
@@ -164,11 +164,23 @@ export class RiskEngine {
   }
 
   /**
-   * Simplified correlation check — in production, use correlation matrices
+   * Sector-based correlation check — groups crypto assets by sector
+   * to prevent over-exposure to correlated assets.
    */
   private areCorrelated(assetA: string, assetB: string): boolean {
     const correlationGroups = [
-      ['BTCUSDT', 'ETHUSDT'],  // Major crypto correlation
+      // Major Crypto (highly correlated)
+      ['BTCUSDT', 'ETHUSDT'],
+      // Layer 1s (correlated during risk-on/off moves)
+      ['ETHUSDT', 'SOLUSDT', 'AVAXUSDT', 'NEARUSDT', 'SUIUSDT', 'APTUSDT', 'DOTUSDT', 'ADAUSDT', 'ATOMUSDT'],
+      // DeFi tokens
+      ['UNIUSDT', 'AAVEUSDT', 'LINKUSDT'],
+      // AI / Data tokens
+      ['FETUSDT', 'RENDERUSDT'],
+      // Meme coins (extremely correlated in pumps/dumps)
+      ['DOGEUSDT', 'SHIBUSDT', 'PEPEUSDT', 'WIFUSDT'],
+      // Layer 2s
+      ['ARBUSDT', 'OPUSDT', 'MATICUSDT'],
     ];
 
     return correlationGroups.some(

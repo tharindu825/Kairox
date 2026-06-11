@@ -1,5 +1,6 @@
 import { getDb } from '@/lib/mongodb';
 import { IndicatorService } from '@/services/indicators';
+import { SmartMoneyService } from '@/services/indicators/smc-service';
 import type { NormalizedCandle } from '@/services/market-data/binance';
 
 export type SideFilter = 'ALL' | 'LONG' | 'SHORT';
@@ -74,15 +75,45 @@ export async function fetchRecentCandles(
   }));
 }
 
-function scoreCandidate(candle: NormalizedCandle, trendStrength: number, macdStrength: number): number {
-  // Momentum: percentage change of the candle body (primary driver of score)
-  const momentum = Math.abs((candle.close - candle.open) / Math.max(candle.open, 1));
+/**
+ * Enhanced scoring function — normalizes momentum by ATR, increases volume weight,
+ * and adds SMC-aware bonuses.
+ */
+function scoreCandidate(
+  candle: NormalizedCandle,
+  trendStrength: number,
+  macdStrength: number,
+  atr: number,
+  adx: number,
+  smcBonus: number,
+): number {
+  // ATR-normalized momentum (how many ATRs did this candle move?)
+  const candleBody = Math.abs(candle.close - candle.open);
+  const atrNormalizedMomentum = atr > 0 ? candleBody / atr : 0;
+
   // Volume: normalize to a 0-1 range using log scale, capped so majors don't dominate
   const logVolume = Math.min(Math.log10(Math.max(candle.volume, 1)) / 10, 1);
+
   // Normalize MACD relative to price so BTC ($60k MACD) doesn't dominate altcoins ($0.01 MACD)
   const normalizedMacd = candle.close > 0 ? macdStrength / candle.close : 0;
-  // Score: momentum (65%), normalized MACD alignment (25%), volume bonus (10%)
-  return (momentum * 100 * trendStrength) * 0.65 + (normalizedMacd * 1000) * 0.25 + logVolume * 0.10;
+
+  // ADX bonus: reward strong trends (ADX > 25)
+  const adxBonus = adx >= 25 ? 0.3 : adx >= 20 ? 0.1 : 0;
+
+  // Score breakdown:
+  //   ATR-normalized momentum (45%) — replaces raw percentage momentum
+  //   MACD alignment (20%)
+  //   Volume bonus (20%) — increased from 10%
+  //   ADX strength (10%)
+  //   SMC bonus (5%)
+  const baseScore =
+    (atrNormalizedMomentum * trendStrength) * 0.45 +
+    (normalizedMacd * 1000) * 0.20 +
+    logVolume * 0.20 +
+    adxBonus * 0.10 +
+    smcBonus * 0.05;
+
+  return baseScore;
 }
 
 function passesIndicatorFilters(
@@ -94,10 +125,19 @@ function passesIndicatorFilters(
     ema50: number;
     atr: number;
     trend: string;
+    adx: number;
+    volatilityRegime: string;
   },
   close: number
 ): boolean {
   if (!Number.isFinite(features.atr) || features.atr <= 0) return false;
+
+  // Skip EXTREME volatility — too risky for automated signals
+  if (features.volatilityRegime === 'EXTREME') return false;
+
+  // ADX filter: skip if market has no trend at all (ADX < 15)
+  // Note: we allow ADX 15-20 (weak trend) as SMC might still detect structure
+  if (features.adx < 15) return false;
 
   // MACD must be aligned with direction
   const macdAligned = inferredSide === 'LONG'
@@ -121,6 +161,71 @@ function passesIndicatorFilters(
   return macdAligned && rsiAligned && emaAligned && isTrending;
 }
 
+/**
+ * Calculate SMC-aware scoring bonus for a candidate.
+ * Returns a 0-1 score representing SMC confluence.
+ */
+function calculateSMCBonus(
+  candles: NormalizedCandle[],
+  inferredSide: 'LONG' | 'SHORT',
+): number {
+  const smcService = new SmartMoneyService();
+  const analysis = smcService.analyze(candles);
+  if (!analysis) return 0;
+
+  let bonus = 0;
+
+  // +0.20 if near an aligned order block
+  if (analysis.nearestOB) {
+    const isAligned =
+      (inferredSide === 'LONG' && analysis.nearestOB.type === 'BULLISH') ||
+      (inferredSide === 'SHORT' && analysis.nearestOB.type === 'BEARISH');
+    if (isAligned && analysis.nearestOB.distancePercent <= 2.0) {
+      bonus += 0.20;
+    }
+  }
+
+  // +0.15 if recent BOS confirms direction
+  if (analysis.lastBOS) {
+    const isAligned =
+      (inferredSide === 'LONG' && analysis.lastBOS.side === 'BULL') ||
+      (inferredSide === 'SHORT' && analysis.lastBOS.side === 'BEAR');
+    if (isAligned && analysis.lastBOS.candlesAgo <= 20) {
+      bonus += 0.15;
+    }
+  }
+
+  // -0.30 if recent CHoCH opposes direction
+  if (analysis.lastCHoCH) {
+    const isOpposing =
+      (inferredSide === 'LONG' && analysis.lastCHoCH.side === 'BEAR') ||
+      (inferredSide === 'SHORT' && analysis.lastCHoCH.side === 'BULL');
+    if (isOpposing && analysis.lastCHoCH.candlesAgo <= 15) {
+      bonus -= 0.30;
+    }
+  }
+
+  // +0.10 if in correct zone (discount for LONG, premium for SHORT)
+  if (
+    (inferredSide === 'LONG' && analysis.premiumDiscount === 'DISCOUNT') ||
+    (inferredSide === 'SHORT' && analysis.premiumDiscount === 'PREMIUM')
+  ) {
+    bonus += 0.10;
+  }
+
+  // +0.10 if near an unfilled FVG aligned with direction
+  if (analysis.nearestFVG) {
+    const isAligned =
+      (inferredSide === 'LONG' && analysis.nearestFVG.type === 'BULLISH') ||
+      (inferredSide === 'SHORT' && analysis.nearestFVG.type === 'BEARISH');
+    if (isAligned && analysis.nearestFVG.distancePercent <= 1.5) {
+      bonus += 0.10;
+    }
+  }
+
+  return Math.max(0, Math.min(1, bonus)); // Clamp to 0-1
+}
+
 async function evaluateSymbol(
   symbol: string,
   timeframe: string,
@@ -135,14 +240,26 @@ async function evaluateSymbol(
   }
 
   const latest = candles[candles.length - 1];
-  const features = indicator.getFeatureBundle(latest);
+  // Use enhanced feature bundle for ADX, volatility regime, etc.
+  const features = indicator.getEnhancedFeatureBundle(candles);
   const inferredSide: 'LONG' | 'SHORT' = features.trend.includes('BULL') ? 'LONG' : 'SHORT';
 
   if (sideFilter !== 'ALL' && sideFilter !== inferredSide) return null;
   if (!passesIndicatorFilters(inferredSide, features, latest.close)) return null;
 
   const trendStrength = features.trend.startsWith('STRONG') ? 2 : 1;
-  const score = scoreCandidate(latest, trendStrength, Math.abs(features.macd.histogram || 0));
+
+  // Calculate SMC bonus for this candidate
+  const smcBonus = calculateSMCBonus(candles, inferredSide);
+
+  const score = scoreCandidate(
+    latest,
+    trendStrength,
+    Math.abs(features.macd.histogram || 0),
+    features.atr,
+    features.adx,
+    smcBonus,
+  );
 
   return {
     symbol,
@@ -215,4 +332,3 @@ export async function selectBestSignalCandidate(
   // Return the top N candidates sorted by score
   return eligible.sort((a, b) => b.score - a.score).slice(0, limit);
 }
-

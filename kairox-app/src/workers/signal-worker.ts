@@ -143,24 +143,47 @@ export const signalWorker = new Worker(
         return { status: 'skipped', reason: 'duplicate_timestamp' };
       }
 
-      // 2. Update Indicators & Generate Feature Bundle
+      // 2. Update Indicators & Generate Enhanced Feature Bundle (with SMC + Elliott Wave)
+      // Always fetch full candle history for SMC/EW analysis
+      const { binanceREST } = await import('@/services/market-data/binance-rest');
+      let candleHistory: NormalizedCandle[] = [];
+
       // Check if indicators are primed for this symbol/timeframe
       const featuresBefore = indicatorService.getFeatureBundle(candle);
       if (featuresBefore.trend === 'NEUTRAL' && featuresBefore.ema200 === candle.close) {
-        // Likely not primed. Let's fetch history.
-        const { binanceREST } = await import('@/services/market-data/binance-rest');
+        // Not primed — fetch history and initialize
         await Logger.info(`Priming indicators on-the-fly for ${candle.symbol}...`, 'Signal Worker');
-        const klines = await binanceREST.getKlines(candle.symbol, candle.timeframe, 250);
-        indicatorService.initialize(candle.symbol, candle.timeframe, klines);
+        candleHistory = await binanceREST.getKlines(candle.symbol, candle.timeframe, 250);
+        indicatorService.initialize(candle.symbol, candle.timeframe, candleHistory);
+      } else {
+        // Already primed — still fetch history for SMC/EW analysis
+        candleHistory = await binanceREST.getKlines(candle.symbol, candle.timeframe, 250);
       }
 
       indicatorService.update(candle);
-      const features = indicatorService.getFeatureBundle(candle);
 
-      // We only generate signals if there's a strong trend or clear setup
-      // Note: We relaxed this to allow the AI to evaluate neutral markets for potential reversals or specific setups
+      // Ensure the current candle is included at the end of history
+      if (candleHistory.length > 0 && candleHistory[candleHistory.length - 1].timestamp !== candle.timestamp) {
+        candleHistory.push(candle);
+      } else if (candleHistory.length === 0) {
+        candleHistory = [candle];
+      }
+
+      // Generate enhanced features with SMC + Elliott Wave + ADX + StochRSI
+      const features = indicatorService.getEnhancedFeatureBundle(candleHistory);
+
+      // Log enhanced analysis context
+      if (features.smc) {
+        await Logger.info(`[SMC] ${candle.symbol}: Structure=${features.smc.structureTrend} | Zone=${features.smc.premiumDiscount} | BOS=${features.smc.lastBOS?.side || 'none'} | CHoCH=${features.smc.lastCHoCH?.side || 'none'}`, 'Signal Worker');
+      }
+      if (features.elliottWave?.currentWave) {
+        await Logger.info(`[EW] ${candle.symbol}: Wave ${features.elliottWave.currentWave.number} (${features.elliottWave.currentWave.type} ${features.elliottWave.currentWave.direction}) confidence=${(features.elliottWave.currentWave.confidence * 100).toFixed(0)}%`, 'Signal Worker');
+      }
+      await Logger.info(`[Indicators] ${candle.symbol}: ADX=${features.adx.toFixed(1)} | StochRSI K=${features.stochRsi.k.toFixed(1)} D=${features.stochRsi.d.toFixed(1)} | Volatility=${features.volatilityRegime}`, 'Signal Worker');
+
+      // Allow AI to evaluate even neutral markets (SMC might detect structure)
       if (features.trend === 'NEUTRAL') {
-        await Logger.info(`Market is NEUTRAL for ${candle.symbol} — Proceeding with AI evaluation.`, 'Signal Worker');
+        await Logger.info(`Market is NEUTRAL for ${candle.symbol} — Proceeding with AI evaluation (SMC/EW may provide direction).`, 'Signal Worker');
       }
 
       // 2. Dual API Model Execution (Run concurrently)
@@ -270,6 +293,17 @@ export const signalWorker = new Worker(
         targets: primarySignal.targets,
         reasoning: primarySignal.reasoning,
         status: signalStatus,
+        // Enhanced analysis context for dashboard review
+        analysisContext: {
+          adx: features.adx,
+          stochRsi: features.stochRsi,
+          volatilityRegime: features.volatilityRegime,
+          smcStructure: features.smc?.structureTrend || null,
+          smcZone: features.smc?.premiumDiscount || null,
+          smcSummary: features.smc?.summary || null,
+          elliottWaveSummary: features.elliottWave?.summary || null,
+          elliottWaveConfidence: features.elliottWave?.currentWave?.confidence || null,
+        },
         createdAt: new Date(),
         updatedAt: new Date(),
       };
