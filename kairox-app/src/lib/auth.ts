@@ -1,13 +1,29 @@
 import NextAuth from 'next-auth';
 import Credentials from 'next-auth/providers/credentials';
 import bcrypt from 'bcryptjs';
-import { MongoDBAdapter } from '@auth/mongodb-adapter';
-import clientPromise, { getDb } from '@/lib/mongodb';
+import { getDb } from '@/lib/mongodb';
 import { authConfig } from './auth.config';
 
+/**
+ * NextAuth v5 configuration.
+ *
+ * IMPORTANT: We do NOT use MongoDBAdapter here because the Credentials provider
+ * with JWT session strategy is incompatible with database adapters.
+ *
+ * The issue: When a database adapter is present, NextAuth v5 tries to create a
+ * database session record for Credentials logins, but the Credentials provider
+ * doesn't support the adapter's createUser/linkAccount flow. This results in the
+ * JWT token not being properly set in the cookie, causing a redirect loop back
+ * to the login page.
+ *
+ * The fix: Remove the adapter entirely. User data is still read from MongoDB
+ * in the authorize() callback. Session data is stored in JWT cookies only.
+ * The adapter was only needed for OAuth providers (Google, GitHub, etc.) which
+ * we're not using.
+ */
 export const { handlers, auth, signIn, signOut } = NextAuth({
   ...authConfig,
-  adapter: MongoDBAdapter(clientPromise),
+  // No adapter — JWT-only sessions for Credentials provider
   providers: [
     Credentials({
       name: 'credentials',
