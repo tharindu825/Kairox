@@ -8,6 +8,22 @@ export type SignalSide = z.infer<typeof SignalSideEnum>;
 export const SignalStatusEnum = z.enum(['PENDING', 'APPROVED', 'BLOCKED', 'EXPIRED', 'INVALIDATED']);
 export type SignalStatus = z.infer<typeof SignalStatusEnum>;
 
+// ─── Market Type ─────────────────────────────────────────────────────────────
+
+export const MarketTypeEnum = z.enum(['CRYPTO', 'FOREX']);
+export type MarketType = z.infer<typeof MarketTypeEnum>;
+
+// ─── Forex Order Types ────────────────────────────────────────────────────────
+
+export const ForexOrderTypeEnum = z.enum(['BUY_LIMIT', 'SELL_LIMIT', 'BUY_STOP', 'SELL_STOP']);
+export type ForexOrderType = z.infer<typeof ForexOrderTypeEnum>;
+
+/** Default forex symbols to scan */
+export const FOREX_DEFAULT_SYMBOLS = [
+  'XAU/USD', 'EUR/USD', 'GBP/USD', 'USD/JPY', 'USD/CHF',
+  'AUD/USD', 'NZD/USD', 'USD/CAD', 'EUR/JPY', 'GBP/JPY',
+];
+
 export const TargetSchema = z.object({
   price: z.number().positive(),
   label: z.string(),
@@ -24,6 +40,12 @@ export const AISignalResponseSchema = z.object({
   keyFactors: z.array(z.string()).min(0).max(10),
 });
 export type AISignalResponse = z.infer<typeof AISignalResponseSchema>;
+
+/** Extended AI response for Forex signals — adds order type */
+export const ForexAISignalResponseSchema = AISignalResponseSchema.extend({
+  forexOrderType: ForexOrderTypeEnum,
+});
+export type ForexAISignalResponse = z.infer<typeof ForexAISignalResponseSchema>;
 
 // ─── Feature Bundle Schema ──────────────────────────────────────────────────
 
@@ -144,6 +166,10 @@ export interface SignalCard {
     confidence: number;
   }>;
   createdAt: Date;
+  /** CRYPTO or FOREX — defaults to CRYPTO for legacy signals */
+  marketType?: MarketType;
+  /** Forex-only: the pending order type used for the Telegram format */
+  forexOrderType?: ForexOrderType;
 }
 
 // ─── Candle Type ────────────────────────────────────────────────────────────

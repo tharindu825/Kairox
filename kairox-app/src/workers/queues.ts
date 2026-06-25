@@ -1,8 +1,13 @@
 import { Queue } from 'bullmq';
 import { createBullMQConnection } from '@/lib/redis';
 
-// Queue for processing indicators and generating signals
+// Queue for processing indicators and generating crypto signals
 export const signalQueue = new Queue('signal-generation', { 
+  connection: createBullMQConnection()
+});
+
+// Queue for processing forex signals
+export const forexSignalQueue = new Queue('forex-signal-generation', {
   connection: createBullMQConnection()
 });
 

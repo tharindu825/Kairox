@@ -1,8 +1,10 @@
 import 'dotenv/config';
 import { marketDataService } from '@/services/market-data';
 import { signalWorker } from '@/workers/signal-worker';
+import { forexSignalWorker } from '@/workers/forex-signal-worker';
 import { alertWorker } from '@/workers/alert-worker';
 import { startAutoSignalGeneration } from '@/services/signals/auto-generator';
+import { startAutoForexSignalGeneration } from '@/services/signals/forex-auto-generator';
 import { binanceREST } from '@/services/market-data/binance-rest';
 import { indicatorService } from '@/services/indicators';
 
@@ -23,17 +25,21 @@ async function bootstrap() {
   console.log('[Bootstrap] Indicators primed successfully.');
 
   console.log(`[Workers] Signal Worker initialized (Queue: ${(signalWorker as any).name})`);
+  console.log(`[Workers] Forex Signal Worker initialized (Queue: ${(forexSignalWorker as any).name})`);
   console.log(`[Workers] Alert Worker initialized (Queue: ${(alertWorker as any).name})`);
 
   console.log('Starting market data websocket stream...');
   marketDataService.startStream();
 
-  const stopAutoSignalGeneration = startAutoSignalGeneration();
+  const stopAutoSignalGeneration      = startAutoSignalGeneration();
+  const stopAutoForexSignalGeneration  = startAutoForexSignalGeneration();
 
   process.on('SIGINT', async () => {
     console.log('\nGracefully shutting down...');
     stopAutoSignalGeneration();
+    stopAutoForexSignalGeneration();
     await (signalWorker as any).close();
+    await (forexSignalWorker as any).close();
     await (alertWorker as any).close();
     process.exit(0);
   });

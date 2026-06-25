@@ -11,17 +11,27 @@ export async function GET(request: Request) {
     }
 
     const { searchParams } = new URL(request.url);
-    const assetParam = searchParams.get('asset');
-    const status = searchParams.get('status');
-    const side = searchParams.get('side');
-    const limit = parseInt(searchParams.get('limit') || '10', 10);
+    const assetParam  = searchParams.get('asset');
+    const status      = searchParams.get('status');
+    const side        = searchParams.get('side');
+    const marketType  = searchParams.get('marketType'); // 'CRYPTO' | 'FOREX' | 'ALL' | null
+    const limit       = parseInt(searchParams.get('limit') || '10', 10);
 
     const db = await getDb();
     
     const query: any = {};
     if (assetParam && assetParam !== 'ALL') query.symbol = assetParam;
-    if (status && status !== 'ALL') query.status = status;
-    if (side && side !== 'ALL') query.side = side;
+    if (status  && status  !== 'ALL') query.status = status;
+    if (side    && side    !== 'ALL') query.side   = side;
+
+    // Market type filtering — legacy signals without a marketType field are treated as CRYPTO
+    if (marketType && marketType !== 'ALL') {
+      if (marketType === 'CRYPTO') {
+        query.$or = [{ marketType: 'CRYPTO' }, { marketType: { $exists: false } }];
+      } else {
+        query.marketType = marketType;
+      }
+    }
 
     const baseSignals = await db.collection('signals')
       .find(query)
@@ -44,6 +54,8 @@ export async function GET(request: Request) {
       return {
         ...data,
         id: signalId,
+        // Backfill marketType for legacy crypto signals
+        marketType: data.marketType || 'CRYPTO',
         asset: asset ? { ...asset, id: asset._id.toString() } : { symbol: data.symbol },
         riskAssessment: riskAssessment ? { ...riskAssessment, id: riskAssessment._id.toString() } : null,
         votes: votes.map(v => ({ ...v, id: v._id.toString() })),
@@ -56,6 +68,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }
 }
+
 
 export async function POST(request: Request) {
   try {
