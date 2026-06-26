@@ -151,7 +151,17 @@ export class ForexOpenRouterService {
         const content = data.choices?.[0]?.message?.content;
         if (!content) throw new Error('Empty response from model');
 
-        const parsed    = JSON.parse(content);
+        const parsed = JSON.parse(content);
+
+        // Sanitize: some models return negative prices for "open" targets.
+        // Clamp any negative or NaN target prices to 0 (= "open" in our format).
+        if (Array.isArray(parsed?.targets)) {
+          parsed.targets = parsed.targets.map((t: any) => ({
+            ...t,
+            price: typeof t.price === 'number' && t.price >= 0 ? t.price : 0,
+          }));
+        }
+
         const validated = ForexAISignalResponseSchema.parse(parsed);
 
         return {
@@ -166,8 +176,13 @@ export class ForexOpenRouterService {
         };
       } catch (error) {
         if (attempt < retries - 1) {
-          const delay = Math.pow(4, attempt) * 1000;
+          const delay = 2000; // 2s fixed delay between retries
           console.warn(`[ForexOpenRouter] Attempt ${attempt + 1} failed, retrying in ${delay}ms...`);
+          if (error instanceof Error) {
+            // Log Zod validation errors in compact form
+            const msg = error.message.slice(0, 300);
+            console.warn(`[ForexOpenRouter] Error: ${msg}`);
+          }
           await new Promise(r => setTimeout(r, delay));
         } else {
           throw error;

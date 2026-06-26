@@ -41,9 +41,15 @@ export const AISignalResponseSchema = z.object({
 });
 export type AISignalResponse = z.infer<typeof AISignalResponseSchema>;
 
-/** Extended AI response for Forex signals — adds order type */
+/** Extended AI response for Forex signals — adds order type + allows price=0 for open targets */
+export const ForexTargetSchema = z.object({
+  price: z.number().min(0), // 0 = "open" / indefinite target (shown as "open" in Telegram)
+  label: z.string(),
+});
+
 export const ForexAISignalResponseSchema = AISignalResponseSchema.extend({
   forexOrderType: ForexOrderTypeEnum,
+  targets: z.array(ForexTargetSchema).max(5), // Override: allow price=0
 });
 export type ForexAISignalResponse = z.infer<typeof ForexAISignalResponseSchema>;
 
