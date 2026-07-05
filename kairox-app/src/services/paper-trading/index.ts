@@ -2,6 +2,7 @@ import { getDb } from '@/lib/mongodb';
 import { ObjectId } from 'mongodb';
 import { NormalizedCandle } from '../market-data/binance';
 import { alertQueue } from '@/workers/queues';
+import { binanceDemoService } from '@/services/execution/binance-demo';
 import { Decimal } from 'decimal.js';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -452,6 +453,24 @@ export class PaperTradingService {
       console.error(`[Paper Trade] Failed to dynamically subscribe to WS stream for ${sig.symbol}:`, err);
     }
 
+    // Execute on Binance Demo Testnet
+    try {
+      if (process.env.BINANCE_TESTNET_API_KEY && sig.marketType !== 'FOREX') {
+        const targetPrice = sig.targets && sig.targets[0] ? Number(sig.targets[0].price) : 0;
+        await binanceDemoService.placeTrade(
+          sig.symbol,
+          sig.side as 'LONG' | 'SHORT',
+          quantity,
+          fillPrice,
+          Number(sig.stopLoss),
+          targetPrice
+        );
+        console.log(`[Binance Demo] Successfully executed auto-trade for ${sig.symbol}`);
+      }
+    } catch (err: any) {
+      console.error(`[Binance Demo] Failed to execute auto-trade for ${sig.symbol}:`, err.message);
+    }
+
     return { id: result.insertedId.toString(), ...orderData };
   }
 
@@ -467,13 +486,14 @@ export class PaperTradingService {
 
     if (!sig) throw new Error('Signal not found');
 
-    // Prevent duplicate shadow trades for the same signal
+    // Prevent duplicate shadow trades for the same signal, instead we just overwrite/retry
     const existing = await db.collection('paperOrders').findOne({
       signalId,
       source: 'SHADOW_TEST',
     });
     if (existing) {
-      throw new Error('Shadow trade already exists for this signal');
+      await db.collection('paperOrders').deleteOne({ _id: existing._id });
+      console.log(`[Paper Trade] Overwriting existing shadow trade for signal ${signalId}`);
     }
 
     // Fetch the latest price to see if we can fill immediately at a better or equal price
@@ -534,6 +554,26 @@ export class PaperTradingService {
       marketDataService.subscribeSymbol(sig.symbol);
     } catch (err) {
       console.error(`[Paper Trade] Failed to subscribe WS for shadow test ${sig.symbol}:`, err);
+    }
+
+    // Execute on Binance Demo Testnet
+    try {
+      if (process.env.BINANCE_TESTNET_API_KEY && sig.marketType !== 'FOREX') {
+        const targetPrice = sig.targets && sig.targets[0] ? Number(sig.targets[0].price) : 0;
+        await binanceDemoService.placeTrade(
+          sig.symbol,
+          sig.side as 'LONG' | 'SHORT',
+          quantity,
+          fillPrice,
+          Number(sig.stopLoss),
+          targetPrice
+        );
+        console.log(`[Binance Demo] Successfully executed manual test trade for ${sig.symbol}`);
+      }
+    } catch (err: any) {
+      console.warn(`[Binance Demo] Could not mirror to Binance Testnet (${err.message}). Kairox will track this trade internally instead.`);
+      // We explicitly DO NOT rollback or throw here, so Kairox's internal engine can still paper trade the coin!
+      orderData.status = status; // Ensure status remains as determined
     }
 
     return { id: result.insertedId.toString(), ...orderData };

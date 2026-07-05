@@ -28,6 +28,7 @@ const navItems = [
   { href: '/dashboard/assets', label: 'Assets', icon: LineChart },
   { href: '/dashboard/risk', label: 'Risk Center', icon: Shield },
   { href: '/dashboard/backtest', label: 'Backtest Lab', icon: FlaskConical },
+  { href: '/dashboard/binance-demo', label: 'Binance Demo', icon: LineChart },
   { href: '/dashboard/settings', label: 'Settings', icon: Settings },
 ];
 

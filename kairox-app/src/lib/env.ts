@@ -27,6 +27,8 @@ const envSchema = z.object({
   // Binance
   BINANCE_WS_URL: z.string().default('wss://stream.binance.com:9443'),
   BINANCE_REST_URL: z.string().default('https://api.binance.com'),
+  BINANCE_TESTNET_API_KEY: z.string().optional(),
+  BINANCE_TESTNET_API_SECRET: z.string().optional(),
 
   // Auto signal generation
   AUTO_SIGNAL_ENABLED: z.enum(['true', 'false']).optional(),
