@@ -11,6 +11,35 @@ function getIntervalMs(): number {
 }
 
 /**
+ * Checks if the forex market is currently open.
+ *
+ * Forex trading hours (approximate):
+ *   Open:  Sunday  ~22:00 UTC (Sydney session opens)
+ *   Close: Friday  ~22:00 UTC (New York session closes)
+ *
+ * We use a small buffer:
+ *   - Skip from Saturday 00:00 UTC through Sunday 21:00 UTC
+ *   - This avoids generating signals on stale weekend data
+ *   - Also skips the thin-liquidity window just after Sunday open
+ */
+export function isForexMarketOpen(): boolean {
+  const now = new Date();
+  const dayUTC = now.getUTCDay();    // 0=Sun, 1=Mon, ..., 5=Fri, 6=Sat
+  const hourUTC = now.getUTCHours();
+
+  // Saturday: always closed
+  if (dayUTC === 6) return false;
+
+  // Sunday: closed until 21:00 UTC (market reopens ~22:00 UTC, we allow 21:00 for pre-open)
+  if (dayUTC === 0 && hourUTC < 21) return false;
+
+  // Friday after 22:00 UTC: closing — skip to avoid stale fills
+  if (dayUTC === 5 && hourUTC >= 22) return false;
+
+  return true;
+}
+
+/**
  * Starts the recurring forex signal auto-generation loop.
  * Mirrors startAutoSignalGeneration() for crypto.
  * Returns a stop function — call it on SIGINT to clear the timer.
@@ -31,6 +60,12 @@ export function startAutoForexSignalGeneration(): () => void {
     running = true;
 
     try {
+      // Skip when forex market is closed (weekends)
+      if (!isForexMarketOpen()) {
+        console.log('[Forex Auto Signals] Market closed (weekend) — skipping cycle.');
+        return;
+      }
+
       console.log(`[Forex Auto Signals] Starting cycle | timeframe=${timeframe}`);
 
       // Select top 3 forex pairs with the best signal setups
@@ -65,3 +100,4 @@ export function startAutoForexSignalGeneration(): () => void {
 
   return () => { clearInterval(timer); };
 }
+

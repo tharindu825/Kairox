@@ -12,6 +12,7 @@ import { twelveDataService } from '@/services/market-data/twelve-data';
 import { publishNotification } from '@/lib/notify';
 import type { NormalizedCandle } from '@/services/market-data/binance';
 import type { ForexOrderType } from '@/types';
+import { isForexMarketOpen } from '@/services/signals/forex-auto-generator';
 
 /** Yahoo Finance (free/no key) first, Twelve Data fallback */
 async function getForexKlines(symbol: string, timeframe: string, limit = 250): Promise<NormalizedCandle[]> {
@@ -140,6 +141,12 @@ export const forexSignalWorker = new Worker(
     await Logger.info(`[Forex] Processing ${candle.symbol} (${candle.timeframe})`, 'Forex Signal Worker');
 
     try {
+      // Weekend guard — skip if market is closed (job may have been queued before close)
+      if (!isForexMarketOpen()) {
+        await Logger.info(`[Forex] Market closed (weekend) — skipping ${candle.symbol}`, 'Forex Signal Worker');
+        return { status: 'skipped', reason: 'market_closed' };
+      }
+
       const db = await getDb();
 
       // ── 0. Cooldown — 4 hours per symbol (matches 4h generation cycle) ───────
