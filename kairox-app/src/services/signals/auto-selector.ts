@@ -127,6 +127,7 @@ function passesIndicatorFilters(
     trend: string;
     adx: number;
     volatilityRegime: string;
+    smc?: { lastBOS?: unknown; nearestOB?: unknown } | null;
   },
   close: number
 ): boolean {
@@ -135,30 +136,31 @@ function passesIndicatorFilters(
   // Skip EXTREME volatility — too risky for automated signals
   if (features.volatilityRegime === 'EXTREME') return false;
 
-  // ADX filter: skip if market has no trend at all (ADX < 15)
-  // Note: we allow ADX 15-20 (weak trend) as SMC might still detect structure
-  if (features.adx < 15) return false;
+  // ADX filter: lowered to 12 to allow weakly trending markets where SMC may still detect structure
+  if (features.adx < 12) return false;
 
   // MACD must be aligned with direction
   const macdAligned = inferredSide === 'LONG'
     ? features.macd.histogram > 0
     : features.macd.histogram < 0;
 
-  // Tightened RSI sweet-spot to filter out marginal setups
+  // Widened RSI window — the AI + risk engine handle extreme readings
   const rsiAligned = inferredSide === 'LONG'
-    ? features.rsi >= 40 && features.rsi <= 65
-    : features.rsi >= 35 && features.rsi <= 60;
+    ? features.rsi >= 30 && features.rsi <= 70
+    : features.rsi >= 30 && features.rsi <= 70;
 
-  // Require BOTH EMAs to align for stronger confirmation
+  // Require at least ONE EMA to align (relaxed from both)
   const emaAligned = inferredSide === 'LONG'
-    ? close >= features.ema20 && close >= features.ema50
-    : close <= features.ema20 && close <= features.ema50;
+    ? close >= features.ema20 || close >= features.ema50
+    : close <= features.ema20 || close <= features.ema50;
 
-  // Allow both STRONG and regular BULL/BEAR trends
+  // Allow NEUTRAL trend when SMC detects structure (BOS or nearby order block)
   const trend = features.trend;
   const isTrending = trend.includes('BULL') || trend.includes('BEAR');
+  const hasSmcConfluence = !!(features.smc?.lastBOS || features.smc?.nearestOB);
+  const trendOk = isTrending || (trend === 'NEUTRAL' && hasSmcConfluence);
 
-  return macdAligned && rsiAligned && emaAligned && isTrending;
+  return macdAligned && rsiAligned && emaAligned && trendOk;
 }
 
 /**
@@ -242,7 +244,22 @@ async function evaluateSymbol(
   const latest = candles[candles.length - 1];
   // Use enhanced feature bundle for ADX, volatility regime, etc.
   const features = indicator.getEnhancedFeatureBundle(candles);
-  const inferredSide: 'LONG' | 'SHORT' = features.trend.includes('BULL') ? 'LONG' : 'SHORT';
+
+  // Infer side — in NEUTRAL trend, use RSI + MACD + SMC to pick direction
+  let inferredSide: 'LONG' | 'SHORT';
+  if (features.trend.includes('BULL')) {
+    inferredSide = 'LONG';
+  } else if (features.trend.includes('BEAR')) {
+    inferredSide = 'SHORT';
+  } else {
+    // NEUTRAL: use momentum signals to infer direction
+    const bullVotes = [
+      features.rsi < 50,
+      features.macd.histogram > 0,
+      features.smc?.lastBOS && (features.smc.lastBOS as any).side === 'BULL',
+    ].filter(Boolean).length;
+    inferredSide = bullVotes >= 2 ? 'LONG' : 'SHORT';
+  }
 
   if (sideFilter !== 'ALL' && sideFilter !== inferredSide) return null;
   if (!passesIndicatorFilters(inferredSide, features, latest.close)) return null;

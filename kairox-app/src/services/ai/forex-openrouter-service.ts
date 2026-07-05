@@ -249,7 +249,7 @@ PRICE PRECISION (CRITICAL):
 - All other pairs: 5 decimal places (e.g. 1.23456)
 - NEVER use the same number for entry, SL, or any target.
 
-If signal quality is insufficient (confidence < 0.65), return HOLD with forexOrderType = BUY_LIMIT as placeholder.
+If signal quality is insufficient (confidence < 0.55), return HOLD with forexOrderType = BUY_LIMIT as placeholder.
 RESPOND ONLY WITH JSON.`;
   }
 

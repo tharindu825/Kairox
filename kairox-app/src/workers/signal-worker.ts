@@ -217,7 +217,19 @@ export const signalWorker = new Worker(
 
       // 3. Model Agreement Check
       const isAgreement = primarySignal.side === confSignal.side;
+      const isPrimaryOnly = primarySignal.side !== 'HOLD' && confSignal.side === 'HOLD';
       console.log(`[Signal Worker] Model Agreement: ${isAgreement} (${primarySignal.side} vs ${confSignal.side})`);
+
+      // 3b. Skip saving HOLD signals — don't waste cooldown slots on non-actionable results
+      if (primarySignal.side === 'HOLD' && confSignal.side === 'HOLD') {
+        await Logger.info(`Both models returned HOLD for ${candle.symbol} — skipping save to preserve cooldown.`, 'Signal Worker');
+        return { status: 'skipped', reason: 'both_hold' };
+      }
+      // If primary is HOLD but confirmation isn't, still skip (primary drives the signal)
+      if (primarySignal.side === 'HOLD') {
+        await Logger.info(`Primary model returned HOLD for ${candle.symbol} — skipping.`, 'Signal Worker');
+        return { status: 'skipped', reason: 'primary_hold' };
+      }
 
       // 4. Get Real Portfolio State from DB
       const portfolio = await getPortfolioState();
@@ -236,13 +248,14 @@ export const signalWorker = new Worker(
       const riskAssessment = customRiskEngine.assess(primarySignal, portfolio, candle.symbol);
 
       // Force BLOCKED if models disagree completely (e.g. LONG vs SHORT)
-      if (primarySignal.side !== 'HOLD' && confSignal.side !== 'HOLD' && !isAgreement) {
+      if (confSignal.side !== 'HOLD' && !isAgreement) {
         riskAssessment.verdict = 'BLOCKED';
         riskAssessment.reasons.push('Absolute model disagreement (LONG vs SHORT)');
       }
 
       // 5b. Multi-Timeframe Confirmation (P7) — check daily trend alignment
-      if (primarySignal.side !== 'HOLD' && riskAssessment.verdict !== 'BLOCKED') {
+      // Softened: only BLOCK for STRONG counter-trend, REDUCE for regular counter-trend
+      if (riskAssessment.verdict !== 'BLOCKED') {
         try {
           const { binanceREST } = await import('@/services/market-data/binance-rest');
           const dailyCandles = await binanceREST.getKlines(candle.symbol, '1d', 220);
@@ -254,14 +267,27 @@ export const signalWorker = new Worker(
             const dailyFeatures = dailyIndicator.getFeatureBundle(dailyCandles[dailyCandles.length - 1]);
             const dailyTrend = dailyFeatures.trend;
 
-            const isCounterTrend =
-              (primarySignal.side === 'LONG' && (dailyTrend === 'BEAR' || dailyTrend === 'STRONG_BEAR')) ||
-              (primarySignal.side === 'SHORT' && (dailyTrend === 'BULL' || dailyTrend === 'STRONG_BULL'));
+            // Strong counter-trend: BLOCK (e.g. LONG vs STRONG_BEAR or SHORT vs STRONG_BULL)
+            const isStrongCounterTrend =
+              (primarySignal.side === 'LONG' && dailyTrend === 'STRONG_BEAR') ||
+              (primarySignal.side === 'SHORT' && dailyTrend === 'STRONG_BULL');
 
-            if (isCounterTrend) {
+            // Regular counter-trend: REDUCE (e.g. LONG vs BEAR or SHORT vs BULL)
+            const isCounterTrend =
+              (primarySignal.side === 'LONG' && dailyTrend === 'BEAR') ||
+              (primarySignal.side === 'SHORT' && dailyTrend === 'BULL');
+
+            if (isStrongCounterTrend) {
               riskAssessment.verdict = 'BLOCKED';
-              riskAssessment.reasons.push(`Counter-trend: ${primarySignal.side} signal vs daily ${dailyTrend} trend`);
-              await Logger.info(`[MTF] Blocked ${candle.symbol} ${primarySignal.side} — daily trend is ${dailyTrend}`, 'Signal Worker');
+              riskAssessment.reasons.push(`Strong counter-trend: ${primarySignal.side} signal vs daily ${dailyTrend} trend`);
+              await Logger.info(`[MTF] Blocked ${candle.symbol} ${primarySignal.side} — daily trend is ${dailyTrend} (strong)`, 'Signal Worker');
+            } else if (isCounterTrend) {
+              // Soften to REDUCED instead of BLOCKED — allow with smaller position
+              if (riskAssessment.verdict === 'APPROVED') {
+                riskAssessment.verdict = 'REDUCED';
+              }
+              riskAssessment.reasons.push(`Counter-trend: ${primarySignal.side} signal vs daily ${dailyTrend} — position reduced`);
+              await Logger.info(`[MTF] Reduced ${candle.symbol} ${primarySignal.side} — daily trend is ${dailyTrend} (counter but not strong)`, 'Signal Worker');
             } else {
               await Logger.info(`[MTF] ${candle.symbol} ${primarySignal.side} aligned with daily ${dailyTrend}`, 'Signal Worker');
             }
@@ -352,24 +378,34 @@ export const signalWorker = new Worker(
 
       await Logger.success(`Signal created: ${signalRecord.id} (${candle.symbol} - ${riskAssessment.verdict})`, 'Signal Worker');
 
-      // 7. Auto-execute Paper Trade if Approved and Agreed
-      if (signalStatus === 'APPROVED' && isAgreement && riskAssessment.positionSize > 0) {
+      // 7. Auto-execute Paper Trade if Approved
+      // Execute if: (a) both models agree, OR (b) primary-only with high confidence (≥0.70) at reduced size
+      const canExecute = signalStatus === 'APPROVED' && riskAssessment.positionSize > 0;
+      const executionSize = isAgreement
+        ? riskAssessment.positionSize
+        : (isPrimaryOnly && primarySignal.confidence >= 0.70)
+          ? riskAssessment.positionSize * 0.5  // Half size for primary-only signals
+          : 0;
+
+      if (canExecute && executionSize > 0) {
         try {
           await paperTradingService.executeApprovedSignal(
             signalRecord.id,
-            riskAssessment.positionSize
+            executionSize
           );
-          await Logger.info(`Paper trade prepared for signal ${signalRecord.id}`, 'Signal Worker');
+          const mode = isAgreement ? 'agreed' : 'primary-only (reduced)';
+          await Logger.info(`Paper trade prepared for signal ${signalRecord.id} (${mode}, size=${executionSize.toFixed(4)})`, 'Signal Worker');
         } catch (err) {
           await Logger.error(`Failed to open paper trade: ${(err as Error).message}`, 'Signal Worker');
         }
       }
 
-      // 8. Dispatch Alert if Approved and Agreed
-      if (signalStatus === 'APPROVED' && isAgreement) {
+      // 8. Dispatch Alert if Approved (agreed or high-confidence primary-only)
+      if (signalStatus === 'APPROVED' && (isAgreement || (isPrimaryOnly && primarySignal.confidence >= 0.70))) {
+        const agreementLabel = isAgreement ? '✅ Agree' : '⚠️ Primary Only (high confidence)';
         await alertQueue.add('send-telegram', {
           signalId: signalRecord.id,
-          message: `🚨 NEW APPROVED SIGNAL 🚨\n\nAsset: ${candle.symbol}\nSide: ${primarySignal.side}\nConfidence: ${(primarySignal.confidence * 100).toFixed(0)}%\nEntry: ${primarySignal.entry}\nStop: ${primarySignal.stopLoss}\nTarget: ${primarySignal.targets[0]?.price}\nR:R: ${riskAssessment.rewardToRisk.toFixed(2)}\nSize: ${riskAssessment.positionSize.toFixed(4)} units\n\nModels: ✅ Agree`
+          message: `🚨 NEW APPROVED SIGNAL 🚨\n\nAsset: ${candle.symbol}\nSide: ${primarySignal.side}\nConfidence: ${(primarySignal.confidence * 100).toFixed(0)}%\nEntry: ${primarySignal.entry}\nStop: ${primarySignal.stopLoss}\nTarget: ${primarySignal.targets[0]?.price}\nR:R: ${riskAssessment.rewardToRisk.toFixed(2)}\nSize: ${executionSize.toFixed(4)} units\n\nModels: ${agreementLabel}`
         });
       }
 

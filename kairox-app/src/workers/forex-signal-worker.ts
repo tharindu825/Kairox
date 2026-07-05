@@ -142,8 +142,8 @@ export const forexSignalWorker = new Worker(
     try {
       const db = await getDb();
 
-      // ── 0. Cooldown — 8 hours per symbol ──────────────────────────────────
-      const SIGNAL_COOLDOWN_MS = 8 * 60 * 60 * 1000;
+      // ── 0. Cooldown — 4 hours per symbol (matches 4h generation cycle) ───────
+      const SIGNAL_COOLDOWN_MS = 4 * 60 * 60 * 1000;
       const cooldownCutoff     = new Date(Date.now() - SIGNAL_COOLDOWN_MS);
       const recentSignal       = await db.collection('signals').findOne(
         { symbol: candle.symbol, marketType: 'FOREX', createdAt: { $gte: cooldownCutoff } },
@@ -151,8 +151,8 @@ export const forexSignalWorker = new Worker(
       );
       if (recentSignal) {
         const ageMin = Math.floor((Date.now() - new Date(recentSignal.createdAt).getTime()) / 60000);
-        await Logger.info(`[Forex] Cooldown active for ${candle.symbol} (${ageMin}m ago) — Skipping.`, 'Forex Signal Worker');
-        return { status: 'skipped', reason: 'cooldown_8h' };
+        await Logger.info(`[Forex] Cooldown active for ${candle.symbol} (${ageMin}m ago, cooldown=240m) — Skipping.`, 'Forex Signal Worker');
+        return { status: 'skipped', reason: 'cooldown_4h' };
       }
 
       // ── 1. Duplicate check ────────────────────────────────────────────────
@@ -206,6 +206,13 @@ export const forexSignalWorker = new Worker(
 
       // ── 4. Model agreement ────────────────────────────────────────────────
       const isAgreement = primarySignal.side === confSignal.side;
+      const isPrimaryOnly = primarySignal.side !== 'HOLD' && confSignal.side === 'HOLD';
+
+      // Skip saving HOLD signals — don't waste cooldown slots
+      if (primarySignal.side === 'HOLD') {
+        await Logger.info(`[Forex] Primary model returned HOLD for ${candle.symbol} — skipping save to preserve cooldown.`, 'Forex Signal Worker');
+        return { status: 'skipped', reason: 'primary_hold' };
+      }
 
       // ── 5. Portfolio state & risk engine ─────────────────────────────────
       const portfolio = await getPortfolioState();
@@ -222,7 +229,7 @@ export const forexSignalWorker = new Worker(
 
       const riskAssessment = customRiskEngine.assess(primarySignal, portfolio, candle.symbol);
 
-      if (primarySignal.side !== 'HOLD' && confSignal.side !== 'HOLD' && !isAgreement) {
+      if (confSignal.side !== 'HOLD' && !isAgreement) {
         riskAssessment.verdict = 'BLOCKED';
         riskAssessment.reasons.push('Absolute model disagreement (LONG vs SHORT)');
       }
@@ -309,7 +316,7 @@ export const forexSignalWorker = new Worker(
       await Logger.success(`[Forex] Signal created: ${signalRecord.id} (${candle.symbol} ${primarySignal.forexOrderType} — ${riskAssessment.verdict})`, 'Forex Signal Worker');
 
       // ── 7. Dispatch Telegram alert in exact forex format ──────────────────
-      if (signalStatus === 'APPROVED' && isAgreement) {
+      if (signalStatus === 'APPROVED' && (isAgreement || (isPrimaryOnly && primarySignal.confidence >= 0.70))) {
         const telegramMessage = buildForexTelegramMessage(
           displaySymbol,
           primarySignal.forexOrderType,

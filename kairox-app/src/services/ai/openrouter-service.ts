@@ -182,8 +182,8 @@ STRUCTURED ANALYSIS FRAMEWORK — Evaluate in this order:
 RULES:
 1. INDEPENDENT ANALYSIS: Independently evaluate technical confluence, price action, and Smart Money structures.
 2. CONSTRUCTIVE ACCURACY: Confirm the trade if the primary setup has high-probability support (e.g. key order block, BOS confirmation, RSI divergence, FVG retest, or EMA alignment).
-3. REDUCED HOLD BIAS: Do not default to "HOLD" if the primary signal aligns with a clear BOS breakout, order block retest, or high-probability continuation setup. Reject or suggest "HOLD" only if the setup poses excessive risk or complete structural contradiction.
-4. CONFIDENCE: 0.65+ indicates actionable, high-probability setups. Below 0.65 MUST be "HOLD".
+3. REDUCED HOLD BIAS: Do not default to "HOLD" if the primary signal aligns with a clear BOS breakout, order block retest, or high-probability continuation setup. Reject or suggest "HOLD" only if the setup poses excessive risk or complete structural contradiction. In ranging markets, SMC structures (order blocks, FVGs, BOS) ARE sufficient confluence — do not require a trending EMA stack to confirm.
+4. CONFIDENCE: 0.55+ indicates actionable setups. Below 0.55 MUST be "HOLD". Between 0.55-0.70 is moderate confidence. Above 0.70 is high confidence.
 5. Invalidation must be a precise price point or technical event.
 6. VOLUME & ATR VALIDATION: Independently verify that volume supports the trade direction (avoid LOW volume breakouts) and that the stop loss is at least 1.5x ATR from entry. Penalize entries that are more than 0.3% from the current price.
 7. SMC VALIDATION: If the signal aligns with an unmitigated order block or unfilled FVG, increase confidence. If the trade is counter to structure (CHoCH detected), flag it.
@@ -201,7 +201,7 @@ STRUCTURED ANALYSIS FRAMEWORK — You MUST analyze in this exact order:
 5. VOLUME: Confirm volume supports the trade direction.
 6. PREMIUM/DISCOUNT: Only enter LONGs in the discount zone and SHORTs in the premium zone (unless extreme momentum breakout).
 7. RISK ASSESSMENT: Calculate ATR-based stops and R:R ratio.
-8. FINAL DECISION: Only generate a signal if 4+ factors align.
+8. FINAL DECISION: Only generate a signal if 3+ factors align. Do NOT default to HOLD in ranging or low-ADX markets — if SMC detects a clear order block, BOS, or FVG setup, that counts as strong confluence even without trending EMAs.
 
 CRITICAL TRADING RULES:
 1. TREND ALIGNMENT: Prefer LONG if Price > EMA200 and market structure is BULLISH (higher highs/lows). Prefer SHORT if Price < EMA200 and structure is BEARISH. Counter-trend setups require a confirmed CHoCH + order block confluence + confidence >= 0.80.
@@ -212,7 +212,7 @@ CRITICAL TRADING RULES:
 6. FAIR VALUE GAPS: Use unfilled FVGs as entry zones and targets. Price tends to revisit and fill these gaps.
 7. LIQUIDITY ZONES: Be aware of equal highs/lows clusters — smart money often sweeps these before reversing. If price is approaching a liquidity zone, wait for the sweep.
 8. CONSERVATIVE R:R: Minimum 1.5:1 Reward-to-Risk ratio is REQUIRED. Use Elliott Wave projected targets when available.
-9. ACCURACY & CONFIDENCE: Accuracy is your primary metric. A signal with < 0.65 confidence MUST be a "HOLD". Assign 0.65+ confidence ONLY to setups where structure, momentum, and key levels align.
+9. ACCURACY & CONFIDENCE: Accuracy is your primary metric. A signal with < 0.55 confidence MUST be a "HOLD". Assign 0.55+ confidence to setups where structure and key levels align. Assign 0.70+ to high-conviction setups with full confluence. In ranging markets (ADX < 20), SMC-based setups (order block + BOS + FVG) ARE sufficient for a signal — do not require a trending EMA stack.
 10. STOP LOSS: Use ATR-based stops. Place the stop loss at a minimum of 1.5x ATR from entry but no more than 3x ATR. Prefer placing stops below/above key order blocks.
 11. ACTIONABLE ENTRY: Entry price MUST be within 0.3% of the CURRENT PRICE. Do NOT suggest deep pullback entries.
 12. VOLUME CONFIRMATION: Avoid trades during LOW or DECLINING volume unless there is overwhelming SMC confluence (order block + BOS + FVG alignment).

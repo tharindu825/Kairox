@@ -118,11 +118,11 @@ export class RiskEngine {
     }
 
     // ─── 8. Confidence Check (aligned with AI prompt thresholds) ────────
-    if (signal.confidence < 0.50) {
-      reasons.push(`Low confidence: ${(signal.confidence * 100).toFixed(0)}% (below 50% threshold)`);
+    if (signal.confidence < 0.45) {
+      reasons.push(`Low confidence: ${(signal.confidence * 100).toFixed(0)}% (below 45% threshold)`);
       verdict = this.escalateVerdict(verdict, 'WATCH_ONLY');
-    } else if (signal.confidence < 0.65) {
-      reasons.push(`Moderate confidence: ${(signal.confidence * 100).toFixed(0)}% (below 65% full-position threshold) — reduced size`);
+    } else if (signal.confidence < 0.55) {
+      reasons.push(`Moderate confidence: ${(signal.confidence * 100).toFixed(0)}% (below 55% full-position threshold) — reduced size`);
       if (verdict === 'APPROVED') verdict = 'REDUCED';
     }
 
