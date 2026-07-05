@@ -257,18 +257,18 @@ export default function AssetDetailPage() {
                     <circle cx="24" cy="24" r="20" fill="none"
                       stroke={latestSignal.side === 'LONG' ? 'var(--kx-long)' : latestSignal.side === 'SHORT' ? 'var(--kx-short)' : 'var(--kx-hold)'}
                       strokeWidth="2.5"
-                      strokeDasharray={`${2 * Math.PI * 20 * latestSignal.confidence} ${2 * Math.PI * 20}`}
+                      strokeDasharray={`${2 * Math.PI * 20 * (latestSignal.winProbability || latestSignal.confidence || 0)} ${2 * Math.PI * 20}`}
                       strokeLinecap="round" />
                   </svg>
                   <span className="absolute inset-0 flex items-center justify-center text-xs font-bold font-mono"
                         style={{ color: 'var(--kx-text-primary)' }}>
-                    {Math.round(latestSignal.confidence * 100)}%
+                    {Math.round((latestSignal.winProbability || latestSignal.confidence || 0) * 100)}%
                   </span>
                 </div>
                 <div className="flex-1">
-                  <div className="text-xs" style={{ color: 'var(--kx-text-muted)' }}>Confidence</div>
+                  <div className="text-xs" style={{ color: 'var(--kx-text-muted)' }}>Probability</div>
                   <div className="text-sm font-medium" style={{ color: 'var(--kx-text-primary)' }}>
-                    {latestSignal.confidence >= 0.7 ? 'High' : latestSignal.confidence >= 0.5 ? 'Moderate' : 'Low'}
+                    {(latestSignal.winProbability || latestSignal.confidence || 0) >= 0.7 ? 'High' : (latestSignal.winProbability || latestSignal.confidence || 0) >= 0.5 ? 'Moderate' : 'Low'}
                   </div>
                 </div>
               </div>
@@ -391,7 +391,7 @@ export default function AssetDetailPage() {
                     <td className="font-mono text-xs" style={{ color: 'var(--kx-long)' }}>
                       ${(signal.targets as any[])?.[0]?.price ? Number((signal.targets as any[])[0].price).toLocaleString() : '—'}
                     </td>
-                    <td className="font-mono text-xs">{Math.round(signal.confidence * 100)}%</td>
+                    <td className="font-mono text-xs">{Math.round((signal.winProbability || signal.confidence || 0) * 100)}%</td>
                     <td>
                       <span className={`${
                         signal.riskAssessment?.verdict === 'APPROVED' ? 'kx-verdict-approved' :

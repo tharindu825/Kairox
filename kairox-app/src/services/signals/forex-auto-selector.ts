@@ -1,6 +1,7 @@
 import { getDb } from '@/lib/mongodb';
 import { IndicatorService } from '@/services/indicators';
 import { SmartMoneyService } from '@/services/indicators/smc-service';
+import { getCurrentForexSession } from '@/services/ai/forex-openrouter-service';
 import { yahooFinanceService } from '@/services/market-data/yahoo-finance';
 import { twelveDataService } from '@/services/market-data/twelve-data';
 import type { NormalizedCandle } from '@/services/market-data/binance';
@@ -70,19 +71,38 @@ interface ForexScore {
   inferredSide: 'LONG' | 'SHORT';
 }
 
-async function scoreForexCandidate(
-  symbol:    string,
-  timeframe: string,
-): Promise<ForexScore | null> {
-  const candles = await getForexKlines(symbol, timeframe, 250);
-  if (!candles || candles.length < 50) return null;
+async function scoreForexCandidate(symbol: string, timeframe: string): Promise<ForexScore | null> {
+  const mtfTimeframes = ['1w', '1d', '4h', '1h', '15m'];
+  
+  // Fetch timeframes (sequential to avoid aggressive rate limits if falling back to TwelveData)
+  const mtfCandles = [];
+  for (const tf of mtfTimeframes) {
+    const c = await fetchForexCandles(symbol, tf, 220);
+    mtfCandles.push(c);
+  }
 
-  // Run indicator service
+  const execCandles = mtfCandles[mtfTimeframes.indexOf(timeframe)];
+  if (!execCandles || execCandles.length < 50) return null;
+
+  // Process MTF Trends
+  const mtfTrends: Record<string, string> = {};
+  for (let i = 0; i < mtfTimeframes.length; i++) {
+    const tf = mtfTimeframes[i];
+    const candles = mtfCandles[i];
+    if (candles && candles.length >= 50) {
+      const svc = new IndicatorService();
+      svc.initialize(symbol, tf, candles);
+      const features = svc.getEnhancedFeatureBundle(candles);
+      mtfTrends[tf] = features.trend;
+    }
+  }
+
+  // Run indicator service for execution timeframe
   const svc = new IndicatorService();
-  svc.initialize(symbol, timeframe, candles);
+  svc.initialize(symbol, timeframe, execCandles);
 
-  const latest   = candles[candles.length - 1];
-  const features = svc.getEnhancedFeatureBundle(candles);
+  const latest   = execCandles[execCandles.length - 1];
+  const features = svc.getEnhancedFeatureBundle(execCandles);
 
   const { rsi, macd, adx, atr, stochRsi, volatilityRegime } = features;
 
@@ -106,9 +126,37 @@ async function scoreForexCandidate(
 
   const inferredSide: 'LONG' | 'SHORT' = bullSignals >= bearSignals ? 'LONG' : 'SHORT';
 
+  // ── True MTF Alignment Check ──
+  let mtfScore = 0;
+  let structuralConflict = false;
+
+  for (const tf of mtfTimeframes) {
+    const trend = mtfTrends[tf];
+    if (!trend) continue;
+
+    if (inferredSide === 'LONG' && trend.includes('BULL')) mtfScore++;
+    if (inferredSide === 'SHORT' && trend.includes('BEAR')) mtfScore++;
+
+    if (tf === '1w' || tf === '1d') {
+      if (inferredSide === 'LONG' && trend === 'STRONG_BEAR') structuralConflict = true;
+      if (inferredSide === 'SHORT' && trend === 'STRONG_BULL') structuralConflict = true;
+    }
+  }
+
+  if (structuralConflict) {
+    return null;
+  }
+
+  // Session Blackout Logic: Avoid low-liquidity SYDNEY session for non-AUD/NZD pairs
+  const currentSession = getCurrentForexSession();
+  const isAudNzd = symbol.includes('AUD') || symbol.includes('NZD');
+  if (currentSession === 'SYDNEY' && !isAudNzd) {
+    return null; // Blackout period for EUR, GBP, USD, etc.
+  }
+
   // Score components
   const momentumScore = Math.abs(rsi - 50) / 50;           // 0-1
-  const trendScore    = adx > 25 ? adx / 100 : 0;          // Trending markets preferred
+  const trendScore    = adx > 20 ? adx / 100 : 0;          // Trending markets preferred (Forex ADX>20 is strong)
   const atrScore      = volatilityRegime === 'HIGH' ? 1
                       : volatilityRegime === 'NORMAL' ? 0.7
                       : volatilityRegime === 'LOW' ? 0.3 : 0.2;
@@ -118,7 +166,10 @@ async function scoreForexCandidate(
     ? (features.smc.lastBOS ? 0.15 : 0) + (features.smc.nearestOB ? 0.15 : 0)
     : 0;
 
-  const score = momentumScore * 0.3 + trendScore * 0.3 + atrScore * 0.2 + macdScore * 0.1 + smcBonus * 0.1;
+  const mtfAlignmentRatio = mtfScore / mtfTimeframes.length;
+  const mtfBonus = mtfAlignmentRatio * 0.2;
+
+  const score = momentumScore * 0.3 + trendScore * 0.3 + atrScore * 0.2 + macdScore * 0.1 + smcBonus * 0.1 + mtfBonus;
 
   return { symbol, candle: latest, score, inferredSide };
 }

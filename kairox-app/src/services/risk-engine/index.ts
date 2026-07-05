@@ -1,4 +1,5 @@
 import type { AISignalResponse, RiskAssessmentResult, RiskVerdict } from '@/types';
+import { calibrationTracker } from '../signals/calibration-tracker';
 
 export interface PortfolioState {
   balance: number;
@@ -17,6 +18,12 @@ export interface RiskPolicy {
   minRewardRisk: number;
   dailyDrawdownLimit: number;
   cooldownMinutes: number;
+  /** EV threshold (in terms of Risk multiples) to approve a signal */
+  evThresholdApproved: number;
+  /** EV threshold (in terms of Risk multiples) to reduce a signal rather than block */
+  evThresholdReduced: number;
+  /** Fractional Kelly multiplier (e.g. 0.5 for Half Kelly) */
+  kellyFraction: number;
 }
 
 const DEFAULT_POLICY: RiskPolicy = {
@@ -26,6 +33,9 @@ const DEFAULT_POLICY: RiskPolicy = {
   minRewardRisk: 1.5,
   dailyDrawdownLimit: 10.0,
   cooldownMinutes: 30,
+  evThresholdApproved: 0.5,
+  evThresholdReduced: 0.1,
+  kellyFraction: 0.5,
 };
 
 export class RiskEngine {
@@ -35,12 +45,12 @@ export class RiskEngine {
     this.policy = { ...DEFAULT_POLICY, ...policy };
   }
 
-  assess(
+  async assess(
     signal: AISignalResponse,
     portfolio: PortfolioState,
     assetSymbol: string,
     instrumentValuePerPoint: number = 1
-  ): RiskAssessmentResult {
+  ): Promise<RiskAssessmentResult> {
     const reasons: string[] = [];
     let verdict: RiskVerdict = 'APPROVED';
 
@@ -71,12 +81,47 @@ export class RiskEngine {
       verdict = this.escalateVerdict(verdict, 'REDUCED');
     }
 
-    // ─── 2. Position Sizing (% risk model) ──────────────────────────────
-    const riskAmount = portfolio.balance * (this.policy.maxRiskPercent / 100);
+    // ─── 2. Expectancy & Position Sizing (Kelly) ────────────────────────
+    
+    // Calibrate the AI's win probability
+    // Assuming modelId 'gemini' and timeframe '4h' as defaults for now
+    const winProb = await calibrationTracker.calibrate(signal.winProbability, 'gemini', '4h');
+    const lossProb = 1 - winProb;
+    
+    // Calculate Expected Value (in terms of Risk Multiples)
+    // EV = (Win% * Reward) - (Loss% * Risk)
+    // Since Risk = 1, Reward = rewardToRisk
+    const evRiskMultiples = (winProb * rewardToRisk) - (lossProb * 1);
+    
+    if (evRiskMultiples <= 0) {
+      reasons.push(`Negative Expectancy: EV = ${evRiskMultiples.toFixed(2)}R. Win probability (${(winProb*100).toFixed(1)}%) too low for ${rewardToRisk.toFixed(2)} R:R.`);
+      verdict = 'BLOCKED';
+    } else if (evRiskMultiples < this.policy.evThresholdReduced) {
+      reasons.push(`Poor Expectancy: EV = ${evRiskMultiples.toFixed(2)}R < ${this.policy.evThresholdReduced}R. Blocking marginal setup.`);
+      verdict = 'BLOCKED';
+    } else if (evRiskMultiples < this.policy.evThresholdApproved) {
+      reasons.push(`Moderate Expectancy: EV = ${evRiskMultiples.toFixed(2)}R < ${this.policy.evThresholdApproved}R. Position size reduced.`);
+      verdict = this.escalateVerdict(verdict, 'REDUCED');
+    } else {
+      reasons.push(`Strong Expectancy: EV = ${evRiskMultiples.toFixed(2)}R. AI Probability: ${(winProb*100).toFixed(1)}%.`);
+    }
+
+    // Kelly Criterion Sizing
+    // Kelly % = W - ((1 - W) / R)
+    let kellyPercent = winProb - (lossProb / (rewardToRisk || 1));
+    kellyPercent = Math.max(0, kellyPercent);
+    
+    // Apply fractional Kelly and cap at maxRiskPercent
+    let actualRiskPercent = (kellyPercent * 100) * this.policy.kellyFraction;
+    actualRiskPercent = Math.min(actualRiskPercent, this.policy.maxRiskPercent);
+    
+    // Fallback if EV is positive but Kelly is very small or negative
+    if (verdict === 'APPROVED' && actualRiskPercent < 0.25) actualRiskPercent = 0.5;
+    
+    const riskAmount = portfolio.balance * (actualRiskPercent / 100);
     const positionSize = stopDistance > 0
       ? riskAmount / (stopDistance * instrumentValuePerPoint)
       : 0;
-    const actualRiskPercent = this.policy.maxRiskPercent;
 
     // ─── 3. Max Open Trades ─────────────────────────────────────────────
     if (portfolio.openTrades >= this.policy.maxOpenTrades) {
@@ -117,14 +162,7 @@ export class RiskEngine {
       }
     }
 
-    // ─── 8. Confidence Check (aligned with AI prompt thresholds) ────────
-    if (signal.confidence < 0.45) {
-      reasons.push(`Low confidence: ${(signal.confidence * 100).toFixed(0)}% (below 45% threshold)`);
-      verdict = this.escalateVerdict(verdict, 'WATCH_ONLY');
-    } else if (signal.confidence < 0.55) {
-      reasons.push(`Moderate confidence: ${(signal.confidence * 100).toFixed(0)}% (below 55% full-position threshold) — reduced size`);
-      if (verdict === 'APPROVED') verdict = 'REDUCED';
-    }
+    // (Confidence logic has been replaced by Expected Value / Kelly logic)
 
     // ─── Final Position Size Adjustment ─────────────────────────────────
     let adjustedSize = positionSize;

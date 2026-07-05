@@ -17,7 +17,7 @@ const SIGNAL_JSON_SCHEMA = {
     type: 'object' as const,
     properties: {
       side: { type: 'string' as const, enum: ['LONG', 'SHORT', 'HOLD'] },
-      confidence: { type: 'number' as const },
+      winProbability: { type: 'number' as const },
       entry: { type: 'number' as const },
       stopLoss: { type: 'number' as const },
       targets: {
@@ -39,7 +39,7 @@ const SIGNAL_JSON_SCHEMA = {
         items: { type: 'string' as const },
       },
     },
-    required: ['side', 'confidence', 'entry', 'stopLoss', 'targets', 'invalidation', 'reasoning', 'keyFactors'],
+    required: ['side', 'winProbability', 'entry', 'stopLoss', 'targets', 'invalidation', 'reasoning', 'keyFactors'],
     additionalProperties: false,
   },
 };
@@ -235,7 +235,7 @@ Generate a trading signal as a JSON object.`;
       success: true,
       data: {
         side: 'HOLD',
-        confidence: 0.45,
+        winProbability: 0.45,
         entry: 65000,
         stopLoss: 64000,
         targets: [{ price: 67000, label: 'TP1' }],

@@ -2,6 +2,7 @@ import { RSI, MACD, EMA, ATR, BollingerBands } from 'trading-signals';
 import { NormalizedCandle } from '../market-data/binance';
 import { SmartMoneyService, type SMCAnalysis } from './smc-service';
 import { ElliottWaveService, type ElliottWaveAnalysis } from './elliott-wave-service';
+import { VolumeProfileService, type VolumeProfileResult } from './volume-profile';
 
 // ─── Feature Bundle ─────────────────────────────────────────────────────────────
 
@@ -32,6 +33,16 @@ export interface FeatureBundle {
 
   // ── New: Elliott Wave ───────────────────────────────────────────────────────
   elliottWave: ElliottWaveAnalysis | null;
+
+  // ── Market Context ──────────────────────────────────────────────────────────
+  marketContext?: {
+    fundingRate?: number;
+    openInterest?: number;
+    session?: string;
+  };
+
+  // ── Volume Profile ──────────────────────────────────────────────────────────
+  vp: VolumeProfileResult | null;
 }
 
 // ─── Internal State ─────────────────────────────────────────────────────────────
@@ -237,6 +248,10 @@ export class IndicatorService {
       console.warn('[Indicator Service] Elliott Wave analysis failed:', (err as Error).message);
     }
 
+    // ── New: Volume Profile ───────────────────────────────────────────────────
+    const vpService = new VolumeProfileService();
+    const vp = vpService.calculate(candles);
+
     return {
       rsi: Number(rsiVal || 50),
       macd: macdVal,
@@ -254,6 +269,8 @@ export class IndicatorService {
       recentCandles,
       smc,
       elliottWave,
+      marketContext: {},
+      vp,
     };
   }
 

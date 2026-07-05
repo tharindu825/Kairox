@@ -2,6 +2,7 @@ import { getDb } from '@/lib/mongodb';
 import { IndicatorService } from '@/services/indicators';
 import { SmartMoneyService } from '@/services/indicators/smc-service';
 import type { NormalizedCandle } from '@/services/market-data/binance';
+import { binanceREST } from '@/services/market-data/binance-rest';
 
 export type SideFilter = 'ALL' | 'LONG' | 'SHORT';
 
@@ -127,6 +128,7 @@ function passesIndicatorFilters(
     trend: string;
     adx: number;
     volatilityRegime: string;
+    volumeProfile: string;
     smc?: { lastBOS?: unknown; nearestOB?: unknown } | null;
   },
   close: number
@@ -159,6 +161,11 @@ function passesIndicatorFilters(
   const isTrending = trend.includes('BULL') || trend.includes('BEAR');
   const hasSmcConfluence = !!(features.smc?.lastBOS || features.smc?.nearestOB);
   const trendOk = isTrending || (trend === 'NEUTRAL' && hasSmcConfluence);
+
+  // Volume Profile Filter: Reject breakouts (BOS) that lack volume support
+  if (features.smc?.lastBOS && features.volumeProfile === 'LOW') {
+    return false;
+  }
 
   return macdAligned && rsiAligned && emaAligned && trendOk;
 }
@@ -233,17 +240,46 @@ async function evaluateSymbol(
   timeframe: string,
   sideFilter: SideFilter
 ): Promise<SignalSelectionResult | null> {
-  const candles = await fetchRecentCandles(symbol, timeframe, 220);
-  if (!candles || candles.length < 60) return null;
+  const mtfTimeframes = ['1w', '1d', '4h', '1h', '15m'];
+  
+  // Fetch all timeframes concurrently
+  const mtfCandles = await Promise.all(
+    mtfTimeframes.map(tf => fetchRecentCandles(symbol, tf, 220))
+  );
+
+  const execCandles = mtfCandles[mtfTimeframes.indexOf(timeframe)];
+  if (!execCandles || execCandles.length < 60) return null;
+
+  // Process all timeframes to get trends
+  const mtfTrends: Record<string, string> = {};
+  for (let i = 0; i < mtfTimeframes.length; i++) {
+    const tf = mtfTimeframes[i];
+    const candles = mtfCandles[i];
+    if (candles && candles.length >= 60) {
+      const indicator = new IndicatorService();
+      for (const candle of candles) indicator.update(candle);
+      const features = indicator.getEnhancedFeatureBundle(candles);
+      mtfTrends[tf] = features.trend;
+    }
+  }
 
   const indicator = new IndicatorService();
-  for (const candle of candles) {
+  for (const candle of execCandles) {
     indicator.update(candle);
   }
 
-  const latest = candles[candles.length - 1];
-  // Use enhanced feature bundle for ADX, volatility regime, etc.
-  const features = indicator.getEnhancedFeatureBundle(candles);
+  const latest = execCandles[execCandles.length - 1];
+  const features = indicator.getEnhancedFeatureBundle(execCandles);
+
+  // Fetch Crypto Futures Context
+  const [fundingRate, openInterest] = await Promise.all([
+    binanceREST.getFundingRate(symbol),
+    binanceREST.getOpenInterest(symbol),
+  ]);
+
+  if (!features.marketContext) features.marketContext = {};
+  if (fundingRate !== null) features.marketContext.fundingRate = fundingRate;
+  if (openInterest !== null) features.marketContext.openInterest = openInterest;
 
   // Infer side — in NEUTRAL trend, use RSI + MACD + SMC to pick direction
   let inferredSide: 'LONG' | 'SHORT';
@@ -264,10 +300,38 @@ async function evaluateSymbol(
   if (sideFilter !== 'ALL' && sideFilter !== inferredSide) return null;
   if (!passesIndicatorFilters(inferredSide, features, latest.close)) return null;
 
+  // ── True MTF Alignment Check ──
+  // Calculate how many timeframes align with the inferred side
+  let mtfScore = 0;
+  let structuralConflict = false;
+
+  for (const tf of mtfTimeframes) {
+    const trend = mtfTrends[tf];
+    if (!trend) continue;
+
+    if (inferredSide === 'LONG' && trend.includes('BULL')) mtfScore++;
+    if (inferredSide === 'SHORT' && trend.includes('BEAR')) mtfScore++;
+
+    // Check for structural conflict (e.g. 15m LONG vs 1w/1d STRONG_BEAR)
+    if (tf === '1w' || tf === '1d') {
+      if (inferredSide === 'LONG' && trend === 'STRONG_BEAR') structuralConflict = true;
+      if (inferredSide === 'SHORT' && trend === 'STRONG_BULL') structuralConflict = true;
+    }
+  }
+
+  if (structuralConflict) {
+    // Top-down structural conflict overrides local setup
+    return null;
+  }
+
   const trendStrength = features.trend.startsWith('STRONG') ? 2 : 1;
 
   // Calculate SMC bonus for this candidate
-  const smcBonus = calculateSMCBonus(candles, inferredSide);
+  const smcBonus = calculateSMCBonus(execCandles, inferredSide);
+
+  // Add MTF alignment bonus to the score (e.g., up to 20% boost for 5/5 alignment)
+  const mtfAlignmentRatio = mtfScore / mtfTimeframes.length;
+  const mtfBonus = mtfAlignmentRatio * 0.2;
 
   const score = scoreCandidate(
     latest,
@@ -276,7 +340,7 @@ async function evaluateSymbol(
     features.atr,
     features.adx,
     smcBonus,
-  );
+  ) + mtfBonus;
 
   return {
     symbol,
@@ -331,9 +395,9 @@ export async function selectBestSignalCandidate(
   
   if (candidates.length === 0) return [];
 
-  // Hard 8-hour cooldown: exclude symbols that already have a signal created in the last 8 hours
+  // Hard 4-hour cooldown: exclude symbols that already have a signal created in the last 4 hours
   const db = await getDb();
-  const SIGNAL_COOLDOWN_MS = 8 * 60 * 60 * 1000; // 8 hours
+  const SIGNAL_COOLDOWN_MS = 4 * 60 * 60 * 1000; // 4 hours
   const cooldownCutoff = new Date(Date.now() - SIGNAL_COOLDOWN_MS);
   const recentSignals = await db.collection('signals')
     .find({ createdAt: { $gte: cooldownCutoff } })
@@ -341,8 +405,21 @@ export async function selectBestSignalCandidate(
     .toArray();
   const recentSymbols = new Set(recentSignals.map((s) => s.symbol));
 
-  // Filter out symbols in cooldown entirely
-  const eligible = candidates.filter((c) => !recentSymbols.has(c.symbol));
+  // 24-hour block for symbols that hit stop-loss (negative PnL trades)
+  const LOSS_BLOCK_MS = 24 * 60 * 60 * 1000;
+  const lossBlockCutoff = new Date(Date.now() - LOSS_BLOCK_MS);
+  const recentLosses = await db.collection('paperOrders')
+    .find({
+      closedAt: { $gte: lossBlockCutoff },
+      status: 'STOPPED',
+      pnl: { $lt: 0 }
+    })
+    .project({ symbol: 1 })
+    .toArray();
+  const lossSymbols = new Set(recentLosses.map((o) => o.symbol));
+
+  // Filter out symbols in cooldown entirely or that have lost within 24h
+  const eligible = candidates.filter((c) => !recentSymbols.has(c.symbol) && !lossSymbols.has(c.symbol));
 
   if (eligible.length === 0) return [];
 

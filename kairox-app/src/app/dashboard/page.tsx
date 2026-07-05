@@ -119,11 +119,11 @@ export default function DashboardPage() {
                           <circle cx="14" cy="14" r="11" fill="none" stroke="var(--kx-border)" strokeWidth="2" />
                           <circle cx="14" cy="14" r="11" fill="none"
                             stroke={signal.side === 'LONG' ? 'var(--kx-long)' : signal.side === 'SHORT' ? 'var(--kx-short)' : 'var(--kx-hold)'}
-                            strokeWidth="2" strokeDasharray={`${2 * Math.PI * 11 * signal.confidence} ${2 * Math.PI * 11}`}
+                            strokeWidth="2" strokeDasharray={`${2 * Math.PI * 11 * (signal.winProbability || signal.confidence || 0)} ${2 * Math.PI * 11}`}
                             strokeLinecap="round" />
                         </svg>
                         <span className="absolute inset-0 flex items-center justify-center text-[8px] font-bold font-mono" style={{ color: 'var(--kx-text-primary)' }}>
-                          {Math.round(signal.confidence * 100)}
+                          {Math.round((signal.winProbability || signal.confidence || 0) * 100)}
                         </span>
                       </div>
 

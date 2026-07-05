@@ -148,7 +148,7 @@ export class YahooFinanceService {
 
       // Build candles, skip any bars with null OHLC (YF returns nulls for gaps)
       let candles: NormalizedCandle[] = timestamps
-        .map((ts, i) => {
+        .map((ts, i): NormalizedCandle | null => {
           const o = opens[i];
           const h = highs[i];
           const l = lows[i];
@@ -165,7 +165,7 @@ export class YahooFinanceService {
             close:     c,
             volume:    volumes[i] ?? 0,
             isClosed:  true,
-          } satisfies NormalizedCandle;
+          };
         })
         .filter((c): c is NormalizedCandle => c !== null);
 

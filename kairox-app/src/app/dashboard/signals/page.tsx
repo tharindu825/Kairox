@@ -273,8 +273,9 @@ export default function SignalsPage() {
     const symbol = String(s?.asset?.symbol || s?.symbol || '').toLowerCase();
     const query  = searchQuery.toLowerCase().trim();
     if (query && !symbol.includes(query)) return false;
-    if (filterQuality === 'HIGH_PROB'  && s.confidence < 0.7)  return false;
-    if (filterQuality === 'ELITE_ONLY' && s.confidence < 0.85) return false;
+    const conf = s.winProbability || s.confidence || 0;
+    if (filterQuality === 'HIGH_PROB'  && conf < 0.7)  return false;
+    if (filterQuality === 'ELITE_ONLY' && conf < 0.85) return false;
     return true;
   });
 
@@ -766,15 +767,15 @@ export default function SignalsPage() {
                         <circle cx="32" cy="32" r="28" fill="none"
                           stroke={signal.side === 'LONG' ? 'var(--kx-long)' : signal.side === 'SHORT' ? 'var(--kx-short)' : 'var(--kx-hold)'}
                           strokeWidth="3"
-                          strokeDasharray={`${2 * Math.PI * 28 * signal.confidence} ${2 * Math.PI * 28}`}
+                          strokeDasharray={`${2 * Math.PI * 28 * (signal.winProbability || signal.confidence || 0)} ${2 * Math.PI * 28}`}
                           strokeLinecap="round"
                         />
                       </svg>
                       <div className="absolute inset-0 flex flex-col items-center justify-center">
                         <span className="text-sm font-bold font-mono" style={{ color: 'var(--kx-text-primary)' }}>
-                          {Math.round(signal.confidence * 100)}%
+                          {Math.round((signal.winProbability || signal.confidence || 0) * 100)}%
                         </span>
-                        <span className="text-[8px] uppercase tracking-tighter opacity-50 font-bold">Confidence</span>
+                        <span className="text-[8px] uppercase tracking-tighter opacity-50 font-bold">Probability</span>
                       </div>
                     </div>
                   )}

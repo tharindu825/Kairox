@@ -10,6 +10,7 @@ const backtestSchema = z.object({
   timeframe: z.string().min(1),
   startDate: z.string(),
   endDate: z.string(),
+  strategy: z.string().optional().default('EMA_CROSSOVER_RSI'),
 });
 
 export async function POST(request: Request) {
@@ -46,6 +47,33 @@ export async function POST(request: Request) {
       return NextResponse.json({
         error: 'Insufficient data for backtesting. Need at least 30 candles.',
       }, { status: 400 });
+    }
+
+    if (body.strategy === 'WFO') {
+      const { walkForwardEngine } = await import('@/services/signals/walk-forward');
+      
+      const config = {
+        symbol: asset,
+        timeframe: timeframe,
+        totalCandles: 500,
+        inSampleWindow: 300,
+        outOfSampleWindow: 200,
+        feeRate: 0.001,
+        slippagePercent: 0.0005,
+      };
+
+      const parameterSpace = [
+        { evThresholdApproved: 0.5, evThresholdReduced: 0.1, kellyFraction: 0.5, minRewardRisk: 1.5 },
+        { evThresholdApproved: 0.8, evThresholdReduced: 0.2, kellyFraction: 0.25, minRewardRisk: 2.0 },
+      ];
+
+      const wfoResults = await walkForwardEngine.runOptimization(config, parameterSpace);
+      
+      return NextResponse.json({
+        id: 'wfo-' + Date.now(),
+        results: { wfo: wfoResults },
+        trades: [],
+      });
     }
 
     // Run a simple rule-based backtest (EMA crossover + RSI filter)

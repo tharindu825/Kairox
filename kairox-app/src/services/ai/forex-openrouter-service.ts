@@ -20,7 +20,7 @@ const FOREX_SIGNAL_JSON_SCHEMA = {
     properties: {
       side:           { type: 'string' as const, enum: ['LONG', 'SHORT', 'HOLD'] },
       forexOrderType: { type: 'string' as const, enum: ['BUY_LIMIT', 'SELL_LIMIT', 'BUY_STOP', 'SELL_STOP'] },
-      confidence:     { type: 'number' as const },
+      winProbability:     { type: 'number' as const },
       entry:          { type: 'number' as const },
       stopLoss:       { type: 'number' as const },
       targets: {
@@ -43,7 +43,7 @@ const FOREX_SIGNAL_JSON_SCHEMA = {
       },
     },
     required: [
-      'side', 'forexOrderType', 'confidence', 'entry', 'stopLoss',
+      'side', 'forexOrderType', 'winProbability', 'entry', 'stopLoss',
       'targets', 'invalidation', 'reasoning', 'keyFactors',
     ],
     additionalProperties: false,
@@ -52,7 +52,7 @@ const FOREX_SIGNAL_JSON_SCHEMA = {
 
 // ── Forex Trading Sessions ───────────────────────────────────────────────────
 
-function getCurrentForexSession(): string {
+export function getCurrentForexSession(): string {
   const hour = new Date().getUTCHours();
   if (hour >= 22 || hour < 7)  return 'SYDNEY';
   if (hour >= 0  && hour < 9)  return 'TOKYO';
@@ -213,7 +213,7 @@ FOREX-SPECIFIC RULES:
    - BUY_STOP / SELL_STOP: entry is ABOVE (buy) or BELOW (sell) current price (breakout order).
    - Match the order type to the price action context — do NOT use BUY_LIMIT if price needs to go UP first.
 7. Use 5 decimal places for pairs without JPY (e.g. 1.23456). Use 3 decimal places for JPY pairs. Use 2 decimal places for XAUUSD.
-8. Confidence < 0.65 MUST be HOLD.
+8. WIN PROBABILITY: Output a statistical 'winProbability' (0.0 to 1.0) representing the true likelihood of the setup hitting TP1 before the Stop Loss. A 0.55 probability means you expect this setup to win 55 out of 100 times. If win probability is < 0.50, the signal MUST be "HOLD".
 9. RESPOND ONLY WITH JSON.`;
     }
 
@@ -231,11 +231,12 @@ ANALYSIS FRAMEWORK (evaluate in order):
 6. PREMIUM / DISCOUNT zones: Only LONG from discount, SHORT from premium (Fibonacci 50% midpoint).
 
 CRITICAL RULES:
-1. TREND: LONG only if price > EMA200 AND bullish structure. SHORT only if price < EMA200 AND bearish structure. Counter-trend requires CHoCH + OB + confidence >= 0.80.
+1. TREND: LONG only if price > EMA200 AND bullish structure. SHORT only if price < EMA200 AND bearish structure. Counter-trend requires CHoCH + OB + win probability >= 0.70.
 2. R:R minimum 1.5:1. Preferred 2:1 or better.
-3. Entry MUST be within 0.5% of current price for MARKET orders; for LIMIT/STOP orders the entry can be further.
-4. SL MUST be placed beyond a structural level (swing high/low or OB boundary).
-5. Provide exactly 3 targets (TP1, TP2, TP3). If TP3 is an open target, set its price to 0.
+3. EXPECTANCY & PROBABILITY: Your primary metric is raw statistical 'winProbability' (0.0 to 1.0) of hitting TP1 before the Stop Loss. Be realistic. If the probability is < 0.50, the signal MUST be a "HOLD". Assign 0.55+ probability to setups where structure and key levels align. Assign 0.70+ to high-conviction setups with full confluence.
+4. Entry MUST be within 0.5% of current price for MARKET orders; for LIMIT/STOP orders the entry can be further.
+5. SL MUST be placed beyond a structural level (swing high/low or OB boundary). Use the Volume Profile Point of Control (POC) or Value Area (VAH/VAL) as liquidity barriers for SL placement.
+6. Provide exactly 3 targets (TP1, TP2, TP3). If TP3 is an open target, set its price to 0. Target the POC if price is mean-reverting.
 6. forexOrderType selection:
    - BUY_LIMIT: Price must FALL to entry level (buy from support/OB below).
    - SELL_LIMIT: Price must RISE to entry level (sell from resistance/OB above).
@@ -249,7 +250,7 @@ PRICE PRECISION (CRITICAL):
 - All other pairs: 5 decimal places (e.g. 1.23456)
 - NEVER use the same number for entry, SL, or any target.
 
-If signal quality is insufficient (confidence < 0.55), return HOLD with forexOrderType = BUY_LIMIT as placeholder.
+If signal quality is insufficient (win probability < 0.55), return HOLD with forexOrderType = BUY_LIMIT as placeholder.
 RESPOND ONLY WITH JSON.`;
   }
 
@@ -269,6 +270,11 @@ RESPOND ONLY WITH JSON.`;
           `  ${i + 1}. O:${fp(c.o)} H:${fp(c.h)} L:${fp(c.l)} C:${fp(c.c)} V:${c.v.toFixed(0)}`
         ).join('\n')
       : '  No recent candle data available';
+
+    let vpInfo = 'Volume Profile data unavailable.';
+    if (features.vp) {
+      vpInfo = `Volume Profile: POC=${features.vp.poc.toFixed(5)}, VAH=${features.vp.vah.toFixed(5)}, VAL=${features.vp.val.toFixed(5)}`;
+    }
 
     let smcSection = 'SMART MONEY CONCEPTS:\n  No SMC data available';
     if (features.smc) {
@@ -295,7 +301,6 @@ TECHNICAL INDICATORS:
 - Stochastic RSI: %K=${features.stochRsi.k.toFixed(2)} | %D=${features.stochRsi.d.toFixed(2)}
 - MACD: ${features.macd.macd.toFixed(6)} | Signal: ${features.macd.signal.toFixed(6)} | Histogram: ${features.macd.histogram.toFixed(6)}
 - ADX(14): ${features.adx.toFixed(2)} (${features.adx >= 25 ? 'TRENDING' : features.adx >= 20 ? 'WEAK TREND' : 'RANGING'})
-- ATR(14): ${features.atr.toFixed(decimals)}
 - EMA(20): ${fp(features.ema20)}
 - EMA(50): ${fp(features.ema50)}
 - EMA(200): ${fp(features.ema200)}
@@ -303,8 +308,11 @@ TECHNICAL INDICATORS:
 
 MARKET CONTEXT:
 - Trend: ${features.trend}
-- Volume Profile: ${features.volumeProfile}
-- Volatility Regime: ${features.volatilityRegime}
+- Volatility & Volume
+  ATR: ${features.atr.toFixed(5)}
+  Volatility Regime: ${features.volatilityRegime}
+  Volume Profile: ${features.volumeProfile}
+  ${vpInfo}
 
 ${smcSection}
 
@@ -326,7 +334,7 @@ Generate a forex trading signal as a JSON object.`;
       data: {
         side:           'HOLD',
         forexOrderType: 'BUY_LIMIT',
-        confidence:     0.4,
+        winProbability:     0.4,
         entry:          0,
         stopLoss:       0,
         targets:        [{ price: 0, label: 'TP1' }, { price: 0, label: 'TP2' }, { price: 0, label: 'TP3' }],

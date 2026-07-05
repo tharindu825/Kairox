@@ -131,7 +131,7 @@ export async function GET(request: Request) {
         tp1 !== undefined ? formatPrice(tp1) : '',
         tp2 !== undefined ? formatPrice(tp2) : '',
         tp3 !== undefined ? formatPrice(tp3) : '',
-        sig.confidence !== undefined ? (sig.confidence * 100).toFixed(0) : '',
+        sig.winProbability !== undefined ? (sig.winProbability * 100).toFixed(0) : '',
         sig.status || '',
         risk?.verdict || '',
         risk?.rewardToRisk !== undefined ? Number(risk.rewardToRisk).toFixed(2) : '',

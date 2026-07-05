@@ -107,8 +107,9 @@ export const signalWorker = new Worker(
     try {
       const db = await getDb();
 
-      // 0. 8-Hour Cooldown Check — skip if a signal was already generated for this symbol in the last 8 hours
-      const SIGNAL_COOLDOWN_MS = 8 * 60 * 60 * 1000; // 8 hours
+      // 1. Cooldown & Duplicate Check
+      // Prevent spamming signals for the same asset within 4 hours
+      const SIGNAL_COOLDOWN_MS = 4 * 60 * 60 * 1000; // 4 hours
       const cooldownCutoff = new Date(Date.now() - SIGNAL_COOLDOWN_MS);
       const recentSignal = await db.collection('signals').findOne(
         { symbol: candle.symbol, createdAt: { $gte: cooldownCutoff } },
@@ -117,10 +118,22 @@ export const signalWorker = new Worker(
       if (recentSignal) {
         const ageMinutes = Math.floor((Date.now() - new Date(recentSignal.createdAt).getTime()) / 60000);
         await Logger.info(
-          `Signal already exists for ${candle.symbol} (${ageMinutes}m ago, cooldown: 8h) — Skipping.`,
+          `Signal already exists for ${candle.symbol} (${ageMinutes}m ago, cooldown: 4h) — Skipping.`,
           'Signal Worker'
         );
-        return { status: 'skipped', reason: 'cooldown_8h' };
+        return { status: 'skipped', reason: 'cooldown_4h' };
+      }
+
+      // ── 24-hour loss block (prevent revenge trading on losing setups) ──
+      const LOSS_BLOCK_MS = 24 * 60 * 60 * 1000;
+      const lossBlockCutoff = new Date(Date.now() - LOSS_BLOCK_MS);
+      const recentLoss = await db.collection('paperOrders').findOne(
+        { symbol: candle.symbol, closedAt: { $gte: lossBlockCutoff }, status: 'STOPPED', pnl: { $lt: 0 } },
+        { sort: { closedAt: -1 } }
+      );
+      if (recentLoss) {
+        await Logger.info(`24h Loss Block active for ${candle.symbol} — Skipping to prevent revenge trading.`, 'Signal Worker');
+        return { status: 'skipped', reason: 'loss_block_24h' };
       }
 
       // 1. Check for Duplicate Signals or Active Trades
@@ -245,7 +258,7 @@ export const signalWorker = new Worker(
         cooldownMinutes: policyDoc.cooldownMinutes,
       }) : riskEngine;
 
-      const riskAssessment = customRiskEngine.assess(primarySignal, portfolio, candle.symbol);
+      const riskAssessment = await customRiskEngine.assess(primarySignal, portfolio, candle.symbol);
 
       // Force BLOCKED if models disagree completely (e.g. LONG vs SHORT)
       if (confSignal.side !== 'HOLD' && !isAgreement) {
@@ -253,50 +266,7 @@ export const signalWorker = new Worker(
         riskAssessment.reasons.push('Absolute model disagreement (LONG vs SHORT)');
       }
 
-      // 5b. Multi-Timeframe Confirmation (P7) — check daily trend alignment
-      // Softened: only BLOCK for STRONG counter-trend, REDUCE for regular counter-trend
-      if (riskAssessment.verdict !== 'BLOCKED') {
-        try {
-          const { binanceREST } = await import('@/services/market-data/binance-rest');
-          const dailyCandles = await binanceREST.getKlines(candle.symbol, '1d', 220);
-          if (dailyCandles.length >= 60) {
-            const dailyIndicator = new (await import('@/services/indicators')).IndicatorService();
-            for (const dc of dailyCandles) {
-              dailyIndicator.update(dc);
-            }
-            const dailyFeatures = dailyIndicator.getFeatureBundle(dailyCandles[dailyCandles.length - 1]);
-            const dailyTrend = dailyFeatures.trend;
-
-            // Strong counter-trend: BLOCK (e.g. LONG vs STRONG_BEAR or SHORT vs STRONG_BULL)
-            const isStrongCounterTrend =
-              (primarySignal.side === 'LONG' && dailyTrend === 'STRONG_BEAR') ||
-              (primarySignal.side === 'SHORT' && dailyTrend === 'STRONG_BULL');
-
-            // Regular counter-trend: REDUCE (e.g. LONG vs BEAR or SHORT vs BULL)
-            const isCounterTrend =
-              (primarySignal.side === 'LONG' && dailyTrend === 'BEAR') ||
-              (primarySignal.side === 'SHORT' && dailyTrend === 'BULL');
-
-            if (isStrongCounterTrend) {
-              riskAssessment.verdict = 'BLOCKED';
-              riskAssessment.reasons.push(`Strong counter-trend: ${primarySignal.side} signal vs daily ${dailyTrend} trend`);
-              await Logger.info(`[MTF] Blocked ${candle.symbol} ${primarySignal.side} — daily trend is ${dailyTrend} (strong)`, 'Signal Worker');
-            } else if (isCounterTrend) {
-              // Soften to REDUCED instead of BLOCKED — allow with smaller position
-              if (riskAssessment.verdict === 'APPROVED') {
-                riskAssessment.verdict = 'REDUCED';
-              }
-              riskAssessment.reasons.push(`Counter-trend: ${primarySignal.side} signal vs daily ${dailyTrend} — position reduced`);
-              await Logger.info(`[MTF] Reduced ${candle.symbol} ${primarySignal.side} — daily trend is ${dailyTrend} (counter but not strong)`, 'Signal Worker');
-            } else {
-              await Logger.info(`[MTF] ${candle.symbol} ${primarySignal.side} aligned with daily ${dailyTrend}`, 'Signal Worker');
-            }
-          }
-        } catch (mtfErr) {
-          // Non-critical: if daily data fetch fails, proceed without MTF filter
-          console.warn(`[Signal Worker] MTF check failed for ${candle.symbol}:`, (mtfErr as Error).message);
-        }
-      }
+      // MTF confirmation is now handled upstream in the auto-selector before hitting the AI.
 
       // 6. Persist Signal to DB
       const asset = await db.collection('assets').findOne({ symbol: candle.symbol });
@@ -313,7 +283,7 @@ export const signalWorker = new Worker(
         timeframe: candle.timeframe,
         candleTimestamp: candle.timestamp,
         side: primarySignal.side,
-        confidence: primarySignal.confidence,
+        winProbability: primarySignal.winProbability,
         entry: primarySignal.entry,
         stopLoss: primarySignal.stopLoss,
         targets: primarySignal.targets,
@@ -354,7 +324,7 @@ export const signalWorker = new Worker(
           apiProvider: 'OPENROUTER',
           role: 'PRIMARY',
           side: primarySignal.side,
-          confidence: primarySignal.confidence,
+          winProbability: primarySignal.winProbability,
           reasoning: primarySignal.reasoning,
           rawResponse: primarySignal,
           latencyMs: primaryResult.latencyMs || 0,
@@ -366,7 +336,7 @@ export const signalWorker = new Worker(
           apiProvider: 'OPENROUTER',
           role: 'CONFIRMATION',
           side: confSignal.side,
-          confidence: confSignal.confidence,
+          winProbability: confSignal.winProbability,
           reasoning: confSignal.reasoning,
           rawResponse: confSignal,
           latencyMs: confirmationResult.latencyMs || 0,
@@ -383,7 +353,7 @@ export const signalWorker = new Worker(
       const canExecute = signalStatus === 'APPROVED' && riskAssessment.positionSize > 0;
       const executionSize = isAgreement
         ? riskAssessment.positionSize
-        : (isPrimaryOnly && primarySignal.confidence >= 0.70)
+        : (isPrimaryOnly && primarySignal.winProbability >= 0.70)
           ? riskAssessment.positionSize * 0.5  // Half size for primary-only signals
           : 0;
 
@@ -401,11 +371,11 @@ export const signalWorker = new Worker(
       }
 
       // 8. Dispatch Alert if Approved (agreed or high-confidence primary-only)
-      if (signalStatus === 'APPROVED' && (isAgreement || (isPrimaryOnly && primarySignal.confidence >= 0.70))) {
+      if (signalStatus === 'APPROVED' && (isAgreement || (isPrimaryOnly && primarySignal.winProbability >= 0.70))) {
         const agreementLabel = isAgreement ? '✅ Agree' : '⚠️ Primary Only (high confidence)';
         await alertQueue.add('send-telegram', {
           signalId: signalRecord.id,
-          message: `🚨 NEW APPROVED SIGNAL 🚨\n\nAsset: ${candle.symbol}\nSide: ${primarySignal.side}\nConfidence: ${(primarySignal.confidence * 100).toFixed(0)}%\nEntry: ${primarySignal.entry}\nStop: ${primarySignal.stopLoss}\nTarget: ${primarySignal.targets[0]?.price}\nR:R: ${riskAssessment.rewardToRisk.toFixed(2)}\nSize: ${executionSize.toFixed(4)} units\n\nModels: ${agreementLabel}`
+          message: `🚨 NEW APPROVED SIGNAL 🚨\n\nAsset: ${candle.symbol}\nSide: ${primarySignal.side}\nWin Prob: ${(primarySignal.winProbability * 100).toFixed(0)}%\nEntry: ${primarySignal.entry}\nStop: ${primarySignal.stopLoss}\nTarget: ${primarySignal.targets[0]?.price}\nR:R: ${riskAssessment.rewardToRisk.toFixed(2)}\nSize: ${executionSize.toFixed(4)} units\n\nModels: ${agreementLabel}`
         });
       }
 

@@ -16,7 +16,7 @@ const SIGNAL_JSON_SCHEMA = {
     type: 'object' as const,
     properties: {
       side: { type: 'string' as const, enum: ['LONG', 'SHORT', 'HOLD'] },
-      confidence: { type: 'number' as const },
+      winProbability: { type: 'number' as const },
       entry: { type: 'number' as const },
       stopLoss: { type: 'number' as const },
       targets: {
@@ -38,7 +38,7 @@ const SIGNAL_JSON_SCHEMA = {
         items: { type: 'string' as const },
       },
     },
-    required: ['side', 'confidence', 'entry', 'stopLoss', 'targets', 'invalidation', 'reasoning', 'keyFactors'],
+    required: ['side', 'winProbability', 'entry', 'stopLoss', 'targets', 'invalidation', 'reasoning', 'keyFactors'],
     additionalProperties: false,
   },
 };
@@ -183,7 +183,7 @@ RULES:
 1. INDEPENDENT ANALYSIS: Independently evaluate technical confluence, price action, and Smart Money structures.
 2. CONSTRUCTIVE ACCURACY: Confirm the trade if the primary setup has high-probability support (e.g. key order block, BOS confirmation, RSI divergence, FVG retest, or EMA alignment).
 3. REDUCED HOLD BIAS: Do not default to "HOLD" if the primary signal aligns with a clear BOS breakout, order block retest, or high-probability continuation setup. Reject or suggest "HOLD" only if the setup poses excessive risk or complete structural contradiction. In ranging markets, SMC structures (order blocks, FVGs, BOS) ARE sufficient confluence — do not require a trending EMA stack to confirm.
-4. CONFIDENCE: 0.55+ indicates actionable setups. Below 0.55 MUST be "HOLD". Between 0.55-0.70 is moderate confidence. Above 0.70 is high confidence.
+4. WIN PROBABILITY: Output a statistical 'winProbability' (0.0 to 1.0) representing the true likelihood of the setup hitting TP1 before the Stop Loss. A 0.55 probability means you expect this setup to win 55 out of 100 times. If win probability is < 0.50, the signal MUST be "HOLD".
 5. Invalidation must be a precise price point or technical event.
 6. VOLUME & ATR VALIDATION: Independently verify that volume supports the trade direction (avoid LOW volume breakouts) and that the stop loss is at least 1.5x ATR from entry. Penalize entries that are more than 0.3% from the current price.
 7. SMC VALIDATION: If the signal aligns with an unmitigated order block or unfilled FVG, increase confidence. If the trade is counter to structure (CHoCH detected), flag it.
@@ -204,7 +204,7 @@ STRUCTURED ANALYSIS FRAMEWORK — You MUST analyze in this exact order:
 8. FINAL DECISION: Only generate a signal if 3+ factors align. Do NOT default to HOLD in ranging or low-ADX markets — if SMC detects a clear order block, BOS, or FVG setup, that counts as strong confluence even without trending EMAs.
 
 CRITICAL TRADING RULES:
-1. TREND ALIGNMENT: Prefer LONG if Price > EMA200 and market structure is BULLISH (higher highs/lows). Prefer SHORT if Price < EMA200 and structure is BEARISH. Counter-trend setups require a confirmed CHoCH + order block confluence + confidence >= 0.80.
+1. TREND ALIGNMENT: Prefer LONG if Price > EMA200 and market structure is BULLISH (higher highs/lows). Prefer SHORT if Price < EMA200 and structure is BEARISH. Counter-trend setups require a confirmed CHoCH + order block confluence + win probability >= 0.70.
 2. OVEREXTENDED MARKETS: Do NOT suggest LONG if RSI > 70 or StochRSI %K > 80. Do NOT suggest SHORT if RSI < 30 or StochRSI %K < 20.
 3. TREND STRENGTH: If ADX < 20, the market is ranging — only take range-bound trades at key order blocks or BB extremes. If ADX > 25, follow the trend.
 4. MOMENTUM: Verify MACD histogram alignment with trade direction. For LONGs, histogram should be positive or turning positive. For SHORTs, negative or turning negative.
@@ -212,12 +212,13 @@ CRITICAL TRADING RULES:
 6. FAIR VALUE GAPS: Use unfilled FVGs as entry zones and targets. Price tends to revisit and fill these gaps.
 7. LIQUIDITY ZONES: Be aware of equal highs/lows clusters — smart money often sweeps these before reversing. If price is approaching a liquidity zone, wait for the sweep.
 8. CONSERVATIVE R:R: Minimum 1.5:1 Reward-to-Risk ratio is REQUIRED. Use Elliott Wave projected targets when available.
-9. ACCURACY & CONFIDENCE: Accuracy is your primary metric. A signal with < 0.55 confidence MUST be a "HOLD". Assign 0.55+ confidence to setups where structure and key levels align. Assign 0.70+ to high-conviction setups with full confluence. In ranging markets (ADX < 20), SMC-based setups (order block + BOS + FVG) ARE sufficient for a signal — do not require a trending EMA stack.
-10. STOP LOSS: Use ATR-based stops. Place the stop loss at a minimum of 1.5x ATR from entry but no more than 3x ATR. Prefer placing stops below/above key order blocks.
-11. ACTIONABLE ENTRY: Entry price MUST be within 0.3% of the CURRENT PRICE. Do NOT suggest deep pullback entries.
-12. VOLUME CONFIRMATION: Avoid trades during LOW or DECLINING volume unless there is overwhelming SMC confluence (order block + BOS + FVG alignment).
-13. ELLIOTT WAVE TARGETS: If a wave count is detected with confidence > 50%, use the projected Fibonacci target for TP placement and the invalidation level for stop-loss reference.
-14. RESPOND ONLY WITH JSON matching the schema precisely.
+9. EXPECTANCY & PROBABILITY: Your primary metric is raw statistical 'winProbability' (0.0 to 1.0) of hitting TP1 before the Stop Loss. Be realistic. If the probability is < 0.50, the signal MUST be a "HOLD". Assign 0.55+ probability to setups where structure and key levels align. Assign 0.70+ to high-conviction setups with full confluence. In ranging markets (ADX < 20), SMC-based setups (order block + BOS + FVG) ARE sufficient for a signal.
+10. VOLUME PROFILE (POC, VAH, VAL): Use the Point of Control (POC) as a magnet for price. Place Stop Losses safely beyond high-volume nodes (e.g. beyond POC or VAH/VAL) rather than in thin liquidity. Target the POC if price is reverting from the extremes.
+11. STOP LOSS: Use ATR-based stops. Place the stop loss at a minimum of 1.5x ATR from entry but no more than 3x ATR. Prefer placing stops below/above key order blocks.
+12. ACTIONABLE ENTRY: Entry price MUST be within 0.3% of the CURRENT PRICE. Do NOT suggest deep pullback entries.
+13. VOLUME CONFIRMATION: Avoid trades during LOW or DECLINING volume unless there is overwhelming SMC confluence (order block + BOS + FVG alignment).
+14. ELLIOTT WAVE TARGETS: If a wave count is detected with probability > 50%, use the projected Fibonacci target for TP placement and the invalidation level for stop-loss reference.
+15. RESPOND ONLY WITH JSON matching the schema precisely.
 
 PRICE PRECISION RULES (CRITICAL):
 - Entry, Stop Loss, and Target prices MUST use proper decimal precision.
@@ -236,6 +237,11 @@ PRICE PRECISION RULES (CRITICAL):
     const price = features.closePrice;
     const pricePrecision = price >= 100 ? 2 : price >= 1 ? 4 : price >= 0.01 ? 5 : 6;
     const formatPrice = (p: number) => p.toFixed(pricePrecision);
+
+    let vpInfo = 'Volume Profile data unavailable.';
+    if (features.vp) {
+      vpInfo = `Volume Profile: POC=${features.vp.poc.toFixed(4)}, VAH=${features.vp.vah.toFixed(4)}, VAL=${features.vp.val.toFixed(4)}`;
+    }
 
     // Build recent candles table
     const candleTable = features.recentCandles.length > 0
@@ -313,7 +319,6 @@ TECHNICAL INDICATORS:
 - Stochastic RSI: %K=${features.stochRsi.k.toFixed(2)} | %D=${features.stochRsi.d.toFixed(2)}
 - MACD: ${features.macd.macd.toFixed(6)} | Signal: ${features.macd.signal.toFixed(6)} | Histogram: ${features.macd.histogram.toFixed(6)}
 - ADX(14): ${features.adx.toFixed(2)} (${features.adx >= 25 ? 'TRENDING' : features.adx >= 20 ? 'WEAK TREND' : 'RANGING'})
-- ATR(14): ${features.atr.toFixed(6)}
 - EMA(20): ${formatPrice(features.ema20)}
 - EMA(50): ${formatPrice(features.ema50)}
 - EMA(200): ${formatPrice(features.ema200)}
@@ -321,8 +326,11 @@ TECHNICAL INDICATORS:
 
 MARKET CONTEXT:
 - Trend: ${features.trend}
-- Volume Profile: ${features.volumeProfile}
-- Volatility Regime: ${features.volatilityRegime}
+-## Volatility & Volume
+ATR: ${features.atr.toFixed(4)}
+Volatility Regime: ${features.volatilityRegime}
+Volume Profile: ${features.volumeProfile}
+${vpInfo}
 
 ${smcSection}
 
@@ -341,7 +349,7 @@ Generate a trading signal as a JSON object.`;
       success: true,
       data: {
         side: 'HOLD',
-        confidence: 0.45,
+        winProbability: 0.45,
         entry: 65000,
         stopLoss: 64000,
         targets: [{ price: 67000, label: 'TP1' }],

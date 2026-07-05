@@ -2,6 +2,7 @@ import { NormalizedCandle } from './binance';
 
 export class BinanceRESTService {
   private baseUrl = 'https://api.binance.com';
+  private futuresBaseUrl = 'https://fapi.binance.com';
 
   /**
    * Fetches historical klines from Binance.
@@ -49,6 +50,36 @@ export class BinanceRESTService {
       symbol: data.symbol,
       price: parseFloat(data.price)
     };
+  }
+
+  /**
+   * Fetches the current funding rate for a perpetual futures contract.
+   */
+  async getFundingRate(symbol: string): Promise<number | null> {
+    const url = `${this.futuresBaseUrl}/fapi/v1/premiumIndex?symbol=${symbol.toUpperCase()}`;
+    try {
+      const response = await fetch(url);
+      if (!response.ok) return null;
+      const data = await response.json();
+      return parseFloat(data.lastFundingRate);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /**
+   * Fetches current Open Interest for a perpetual futures contract.
+   */
+  async getOpenInterest(symbol: string): Promise<number | null> {
+    const url = `${this.futuresBaseUrl}/fapi/v1/openInterest?symbol=${symbol.toUpperCase()}`;
+    try {
+      const response = await fetch(url);
+      if (!response.ok) return null;
+      const data = await response.json();
+      return parseFloat(data.openInterest);
+    } catch (e) {
+      return null;
+    }
   }
 }
 

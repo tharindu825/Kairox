@@ -31,7 +31,7 @@ export const TargetSchema = z.object({
 
 export const AISignalResponseSchema = z.object({
   side: SignalSideEnum,
-  confidence: z.number().min(0).max(1),
+  winProbability: z.number().min(0).max(1),
   entry: z.number().nonnegative(),
   stopLoss: z.number().nonnegative(),
   targets: z.array(TargetSchema).max(5),
@@ -89,7 +89,14 @@ export const FeatureBundleSchema = z.object({
     volatilityRegime: z.enum(['LOW', 'NORMAL', 'HIGH', 'EXTREME']),
     volumeProfile: z.enum(['LOW', 'NORMAL', 'HIGH']),
     session: z.string().optional(),
+    fundingRate: z.number().optional(),
+    openInterest: z.number().optional(),
   }),
+  vp: z.object({
+    poc: z.number(),
+    vah: z.number(),
+    val: z.number(),
+  }).nullable().optional(),
   recentCandles: z.array(z.object({
     time: z.number(),
     open: z.number(),
@@ -155,7 +162,7 @@ export interface SignalCard {
   asset: string;
   timeframe: string;
   side: SignalSide;
-  confidence: number;
+  winProbability: number;
   entry: number;
   stopLoss: number;
   targets: Array<{ price: number; label: string }>;
@@ -169,7 +176,7 @@ export interface SignalCard {
     apiProvider: string;
     role: string;
     side: SignalSide;
-    confidence: number;
+    winProbability: number;
   }>;
   createdAt: Date;
   /** CRYPTO or FOREX — defaults to CRYPTO for legacy signals */

@@ -162,6 +162,18 @@ export const forexSignalWorker = new Worker(
         return { status: 'skipped', reason: 'cooldown_4h' };
       }
 
+      // ── 0.5. 24-hour loss block (prevent revenge trading on losing setups) ──
+      const LOSS_BLOCK_MS = 24 * 60 * 60 * 1000;
+      const lossBlockCutoff = new Date(Date.now() - LOSS_BLOCK_MS);
+      const recentLoss = await db.collection('paperOrders').findOne(
+        { symbol: candle.symbol, closedAt: { $gte: lossBlockCutoff }, status: 'STOPPED', pnl: { $lt: 0 } },
+        { sort: { closedAt: -1 } }
+      );
+      if (recentLoss) {
+        await Logger.info(`[Forex] 24h Loss Block active for ${candle.symbol} — Skipping to prevent revenge trading.`, 'Forex Signal Worker');
+        return { status: 'skipped', reason: 'loss_block_24h' };
+      }
+
       // ── 1. Duplicate check ────────────────────────────────────────────────
       const existingSignal = await db.collection('signals').findOne({
         symbol:          candle.symbol,
@@ -234,7 +246,7 @@ export const forexSignalWorker = new Worker(
         cooldownMinutes:   policyDoc.cooldownMinutes,
       }) : riskEngine;
 
-      const riskAssessment = customRiskEngine.assess(primarySignal, portfolio, candle.symbol);
+      const riskAssessment = await customRiskEngine.assess(primarySignal, portfolio, candle.symbol);
 
       if (confSignal.side !== 'HOLD' && !isAgreement) {
         riskAssessment.verdict = 'BLOCKED';
@@ -262,7 +274,7 @@ export const forexSignalWorker = new Worker(
         timeframe:       candle.timeframe,
         candleTimestamp: candle.timestamp,
         side:            primarySignal.side,
-        confidence:      primarySignal.confidence,
+        winProbability:      primarySignal.winProbability,
         entry:           primarySignal.entry,
         stopLoss:        primarySignal.stopLoss,
         targets,
@@ -299,7 +311,7 @@ export const forexSignalWorker = new Worker(
           apiProvider:  'OPENROUTER',
           role:         'PRIMARY',
           side:         primarySignal.side,
-          confidence:   primarySignal.confidence,
+          winProbability:   primarySignal.winProbability,
           reasoning:    primarySignal.reasoning,
           rawResponse:  primarySignal,
           latencyMs:    primaryResult.latencyMs || 0,
@@ -311,7 +323,7 @@ export const forexSignalWorker = new Worker(
           apiProvider:  'OPENROUTER',
           role:         'CONFIRMATION',
           side:         confSignal.side,
-          confidence:   confSignal.confidence,
+          winProbability:   confSignal.winProbability,
           reasoning:    confSignal.reasoning,
           rawResponse:  confSignal,
           latencyMs:    confirmResult.latencyMs || 0,
@@ -323,7 +335,7 @@ export const forexSignalWorker = new Worker(
       await Logger.success(`[Forex] Signal created: ${signalRecord.id} (${candle.symbol} ${primarySignal.forexOrderType} — ${riskAssessment.verdict})`, 'Forex Signal Worker');
 
       // ── 7. Dispatch Telegram alert in exact forex format ──────────────────
-      if (signalStatus === 'APPROVED' && (isAgreement || (isPrimaryOnly && primarySignal.confidence >= 0.70))) {
+      if (signalStatus === 'APPROVED' && (isAgreement || (isPrimaryOnly && primarySignal.winProbability >= 0.70))) {
         const telegramMessage = buildForexTelegramMessage(
           displaySymbol,
           primarySignal.forexOrderType,
