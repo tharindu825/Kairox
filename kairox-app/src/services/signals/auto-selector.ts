@@ -133,41 +133,20 @@ function passesIndicatorFilters(
   },
   close: number
 ): boolean {
+  // Only hard-gate on data quality and extreme risk — let the AI + risk engine handle directional filtering
   if (!Number.isFinite(features.atr) || features.atr <= 0) return false;
 
   // Skip EXTREME volatility — too risky for automated signals
   if (features.volatilityRegime === 'EXTREME') return false;
 
-  // ADX filter: lowered to 12 to allow weakly trending markets where SMC may still detect structure
-  if (features.adx < 12) return false;
+  // Minimum trend strength — very flat markets rarely produce good signals
+  if (features.adx < 10) return false;
 
-  // MACD must be aligned with direction
-  const macdAligned = inferredSide === 'LONG'
-    ? features.macd.histogram > 0
-    : features.macd.histogram < 0;
-
-  // Widened RSI window — the AI + risk engine handle extreme readings
-  const rsiAligned = inferredSide === 'LONG'
-    ? features.rsi >= 30 && features.rsi <= 70
-    : features.rsi >= 30 && features.rsi <= 70;
-
-  // Require at least ONE EMA to align (relaxed from both)
-  const emaAligned = inferredSide === 'LONG'
-    ? close >= features.ema20 || close >= features.ema50
-    : close <= features.ema20 || close <= features.ema50;
-
-  // Allow NEUTRAL trend when SMC detects structure (BOS or nearby order block)
-  const trend = features.trend;
-  const isTrending = trend.includes('BULL') || trend.includes('BEAR');
-  const hasSmcConfluence = !!(features.smc?.lastBOS || features.smc?.nearestOB);
-  const trendOk = isTrending || (trend === 'NEUTRAL' && hasSmcConfluence);
-
-  // Volume Profile Filter: Reject breakouts (BOS) that lack volume support
-  if (features.smc?.lastBOS && features.volumeProfile === 'LOW') {
-    return false;
-  }
-
-  return macdAligned && rsiAligned && emaAligned && trendOk;
+  // All other filters (MACD alignment, RSI range, EMA alignment, trend direction,
+  // volume profile) have been removed from the pre-selector. The AI model receives
+  // full indicator data and makes its own directional decision, and the risk engine
+  // validates R:R and EV before approving.
+  return true;
 }
 
 /**
@@ -250,6 +229,12 @@ async function evaluateSymbol(
   const execCandles = mtfCandles[mtfTimeframes.indexOf(timeframe)];
   if (!execCandles || execCandles.length < 60) return null;
 
+  const latestCandle = execCandles[execCandles.length - 1];
+  // Dead coin check: If the latest candle open time is older than 7 days, it's likely delisted or halted
+  if (Date.now() - latestCandle.timestamp > 7 * 24 * 60 * 60 * 1000) {
+    return null;
+  }
+
   // Process all timeframes to get trends
   const mtfTrends: Record<string, string> = {};
   for (let i = 0; i < mtfTimeframes.length; i++) {
@@ -319,10 +304,8 @@ async function evaluateSymbol(
     }
   }
 
-  if (structuralConflict) {
-    // Top-down structural conflict overrides local setup
-    return null;
-  }
+  // Structural conflict is now a score penalty (-0.3) instead of a hard reject.
+  // This allows mean-reversion setups at key SMC levels while still deprioritising them.
 
   const trendStrength = features.trend.startsWith('STRONG') ? 2 : 1;
 
@@ -333,6 +316,9 @@ async function evaluateSymbol(
   const mtfAlignmentRatio = mtfScore / mtfTimeframes.length;
   const mtfBonus = mtfAlignmentRatio * 0.2;
 
+  // Structural conflict penalty (instead of hard reject)
+  const conflictPenalty = structuralConflict ? -0.3 : 0;
+
   const score = scoreCandidate(
     latest,
     trendStrength,
@@ -340,7 +326,7 @@ async function evaluateSymbol(
     features.atr,
     features.adx,
     smcBonus,
-  ) + mtfBonus;
+  ) + mtfBonus + conflictPenalty;
 
   return {
     symbol,
@@ -357,8 +343,11 @@ export async function selectBestSignalCandidate(
   const timeframe = options.timeframe || '1h';
   const sideFilter: SideFilter = options.sideFilter || 'ALL';
   const assetQuery = (options.assetQuery || '').toUpperCase().trim();
-  const symbols = await resolveCandidateSymbols(options.candidateSymbols);
-  const filteredSymbols = assetQuery ? symbols.filter((symbol) => symbol.includes(assetQuery)) : symbols;
+  const dbSymbols = await resolveCandidateSymbols(options.candidateSymbols);
+
+  // Always include the top 30 major coins so BTC/ETH/SOL etc. are scanned every cycle
+  const mergedSymbols = Array.from(new Set([...DEFAULT_SYMBOLS, ...dbSymbols]));
+  const filteredSymbols = assetQuery ? mergedSymbols.filter((symbol) => symbol.includes(assetQuery)) : mergedSymbols;
 
   if (filteredSymbols.length === 0) return [];
 
@@ -405,8 +394,8 @@ export async function selectBestSignalCandidate(
     .toArray();
   const recentSymbols = new Set(recentSignals.map((s) => s.symbol));
 
-  // 24-hour block for symbols that hit stop-loss (negative PnL trades)
-  const LOSS_BLOCK_MS = 24 * 60 * 60 * 1000;
+  // 4-hour block for symbols that hit stop-loss (reduced from 24h to allow same-day re-entry)
+  const LOSS_BLOCK_MS = 4 * 60 * 60 * 1000; // 4 hours
   const lossBlockCutoff = new Date(Date.now() - LOSS_BLOCK_MS);
   const recentLosses = await db.collection('paperOrders')
     .find({
@@ -418,7 +407,7 @@ export async function selectBestSignalCandidate(
     .toArray();
   const lossSymbols = new Set(recentLosses.map((o) => o.symbol));
 
-  // Filter out symbols in cooldown entirely or that have lost within 24h
+  // Filter out symbols in cooldown entirely or that have lost within 4h
   const eligible = candidates.filter((c) => !recentSymbols.has(c.symbol) && !lossSymbols.has(c.symbol));
 
   if (eligible.length === 0) return [];

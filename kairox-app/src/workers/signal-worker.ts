@@ -124,16 +124,16 @@ export const signalWorker = new Worker(
         return { status: 'skipped', reason: 'cooldown_4h' };
       }
 
-      // ── 24-hour loss block (prevent revenge trading on losing setups) ──
-      const LOSS_BLOCK_MS = 24 * 60 * 60 * 1000;
+      // ── 4-hour loss block (reduced from 24h to allow same-day re-entry) ──
+      const LOSS_BLOCK_MS = 4 * 60 * 60 * 1000;
       const lossBlockCutoff = new Date(Date.now() - LOSS_BLOCK_MS);
       const recentLoss = await db.collection('paperOrders').findOne(
         { symbol: candle.symbol, closedAt: { $gte: lossBlockCutoff }, status: 'STOPPED', pnl: { $lt: 0 } },
         { sort: { closedAt: -1 } }
       );
       if (recentLoss) {
-        await Logger.info(`24h Loss Block active for ${candle.symbol} — Skipping to prevent revenge trading.`, 'Signal Worker');
-        return { status: 'skipped', reason: 'loss_block_24h' };
+        await Logger.info(`4h Loss Block active for ${candle.symbol} — Skipping.`, 'Signal Worker');
+        return { status: 'skipped', reason: 'loss_block_4h' };
       }
 
       // 1. Check for Duplicate Signals or Active Trades
@@ -216,6 +216,13 @@ export const signalWorker = new Worker(
       const primarySignal = primaryResult.data;
       const confSignal = confirmationResult.data;
 
+      // ── Enforce Market Entry ──
+      // To prevent signals from expiring without filling (43% expiry rate historically),
+      // we force the entry price to be the current candle close price. 
+      if (primarySignal.side !== 'HOLD') {
+        primarySignal.entry = candle.close;
+      }
+
       // 1b. Active Trade Check & Trend Reversal Warning
       if (activeTrade && primarySignal.side !== 'HOLD') {
         if (activeTrade.side === primarySignal.side) {
@@ -289,6 +296,7 @@ export const signalWorker = new Worker(
         targets: primarySignal.targets,
         reasoning: primarySignal.reasoning,
         status: signalStatus,
+        marketType: 'CRYPTO',
         // Enhanced analysis context for dashboard review
         analysisContext: {
           adx: features.adx,

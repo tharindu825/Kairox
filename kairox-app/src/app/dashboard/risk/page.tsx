@@ -30,8 +30,9 @@ function formatPrice(price: number): string {
 }
 
 export default function RiskPage() {
+  const [tradeTab, setTradeTab] = useState('ALL');
   const { data, error, isLoading, mutate: mutateRisk } = useSWR('/api/risk', fetcher, { refreshInterval: 5000 });
-  const { data: paperData, mutate: mutatePaper } = useSWR('/api/paper-trades', fetcher, { refreshInterval: 5000 });
+  const { data: paperData, mutate: mutatePaper } = useSWR(`/api/paper-trades?status=${tradeTab}`, fetcher, { refreshInterval: 5000 });
   const [isKilling, setIsKilling] = useState(false);
   const metrics = data?.metrics ?? {
     capitalAtRisk: 0,
@@ -142,9 +143,29 @@ export default function RiskPage() {
           <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
             {/* Paper Trades Table */}
             <div className="lg:col-span-3 space-y-4">
-              <h3 className="font-semibold flex items-center gap-2" style={{ color: 'var(--kx-text-primary)' }}>
-                <DollarSign className="w-4 h-4" /> Paper Trades
-              </h3>
+              <div className="flex items-center justify-between">
+                <h3 className="font-semibold flex items-center gap-2" style={{ color: 'var(--kx-text-primary)' }}>
+                  <DollarSign className="w-4 h-4" /> Paper Trades
+                </h3>
+                <div className="flex bg-black/20 rounded-md p-1 border border-white/5">
+                  {[
+                    { id: 'ALL', label: 'Recent' },
+                    { id: 'HISTORY', label: 'All History' },
+                    { id: 'WINS', label: 'Wins' },
+                    { id: 'LOSSES', label: 'Losses' }
+                  ].map(tab => (
+                    <button
+                      key={tab.id}
+                      onClick={() => setTradeTab(tab.id)}
+                      className={`px-3 py-1 text-xs font-medium rounded transition-colors ${
+                        tradeTab === tab.id ? 'bg-white/10 text-white' : 'text-white/40 hover:text-white/70'
+                      }`}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
 
               <div className="kx-card overflow-hidden">
                 <div className="overflow-x-auto">
@@ -168,7 +189,7 @@ export default function RiskPage() {
                           </td>
                         </tr>
                       )}
-                      {paperData?.orders?.slice(0, 15).map((order: any) => {
+                      {paperData?.orders?.map((order: any) => {
                         const tpDots = [
                           { label: 'TP1', hit: order.tp1Hit },
                           { label: 'TP2', hit: order.tp2Hit },

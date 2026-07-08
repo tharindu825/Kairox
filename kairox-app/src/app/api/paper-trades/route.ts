@@ -44,6 +44,17 @@ export async function GET(request: Request) {
       if (['OPEN', 'PENDING'].includes(status)) {
         query.status = status;
         delete query.$or;
+      } else if (status === 'HISTORY') {
+        query.status = { $in: ['CLOSED', 'STOPPED', 'EXPIRED', 'CANCELLED'] };
+        delete query.$or;
+      } else if (status === 'WINS') {
+        query.status = { $in: ['CLOSED', 'STOPPED'] };
+        query.pnl = { $gt: 0 };
+        delete query.$or;
+      } else if (status === 'LOSSES') {
+        query.status = { $in: ['CLOSED', 'STOPPED'] };
+        query.pnl = { $lte: 0 };
+        delete query.$or;
       } else {
         query.status = status;
         query.$or = [
@@ -53,10 +64,12 @@ export async function GET(request: Request) {
       }
     }
 
+    const limit = ['HISTORY', 'WINS', 'LOSSES'].includes(status || '') ? 200 : 50;
+
     const docs = await db.collection('paperOrders')
       .find(query)
       .sort({ openedAt: -1 })
-      .limit(50)
+      .limit(limit)
       .toArray();
 
     const formatted = await Promise.all(docs.map(async (order) => {
@@ -74,6 +87,9 @@ export async function GET(request: Request) {
       let currentPrice: number | null = null;
 
       if (order.status === 'OPEN') {
+        // Ensure the WS is tracking this active symbol (fixes frozen P&L after server restart)
+        marketDataService.subscribeSymbol(order.symbol);
+
         const latest = await marketDataService.getLatestPrice(order.symbol);
         if (latest) {
           currentPrice = Number(latest);

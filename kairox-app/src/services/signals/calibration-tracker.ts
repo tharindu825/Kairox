@@ -19,9 +19,10 @@ export class CalibrationTracker {
   async getCalibrationModifier(modelId: string, timeframe: string): Promise<number> {
     // TODO: Implement DB query to fetch real hit rate vs predicted hit rate
     
-    // Default conservative calibration: penalize AI overconfidence by 10%
-    // i.e., if AI says 70% win probability, we treat it as 63% (0.7 * 0.9).
-    return 0.90;
+    // Default conservative calibration: penalize AI overconfidence by 5%
+    // Reduced from 10% since we don't have real calibration data yet.
+    // i.e., if AI says 70% win probability, we treat it as 66.5% (0.7 * 0.95).
+    return 0.95;
   }
 
   /**

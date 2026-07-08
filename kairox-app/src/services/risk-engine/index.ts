@@ -30,11 +30,11 @@ const DEFAULT_POLICY: RiskPolicy = {
   maxRiskPercent: 2.0,
   maxOpenTrades: 10,
   maxCorrelated: 3,
-  minRewardRisk: 1.5,
+  minRewardRisk: 1.0,       // Lowered from 1.5 — profitable at >50% win rate
   dailyDrawdownLimit: 10.0,
   cooldownMinutes: 30,
-  evThresholdApproved: 0.5,
-  evThresholdReduced: 0.1,
+  evThresholdApproved: 0.15, // Lowered from 0.5R — allow moderate-EV setups at full size
+  evThresholdReduced: 0.0,   // Lowered from 0.1R — any positive EV is allowed at reduced size
   kellyFraction: 0.5,
 };
 
