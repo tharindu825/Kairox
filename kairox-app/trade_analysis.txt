@@ -1,0 +1,51 @@
+# Kairox Trade and Signal Analysis Report
+
+This document provides an analysis of paper trades and signals on the Kairox platform, specifically addressing win/loss ratios, signal approval correlation, and the profitability of approved signals.
+
+## Overview of Data
+
+Based on the latest database snapshot:
+
+- Total Signals Generated: 940
+- Total Paper Orders Placed: 123
+- Total Approved Signals: 107
+
+---
+
+## Win & Loss Trade Analysis
+
+Out of all closed trades, we have the following distribution:
+
+- Total Win Trades (Profitable): 17
+- Total Loss Trades (Unprofitable): 5
+
+NOTE: The win/loss ratio for closed paper trades is currently positive, with 17 wins compared to 5 losses. 
+
+### Question 1: Are all win trades from approved signals?
+Answer: No.
+
+Out of the 17 total winning trades:
+- 13 win trades were from Approved signals.
+- 4 win trades were from Non-Approved signals (These could be manually placed trades, or trades attached to signals that were later blocked, cancelled, or expired).
+
+---
+
+## Approved Signals Analysis
+
+### Question 2: Do all approved signals go to profit?
+Answer: No.
+
+Out of the 107 total Approved Signals:
+- 13 signals resulted in a Win (Profit).
+- 4 signals resulted in a Loss.
+- 90 signals have Not Closed or Had No Order. (These are either currently open positions, or signals that did not trigger a paper order execution).
+
+WARNING: While approved signals have a good win rate when they execute and close (13 wins vs 4 losses), the vast majority of approved signals (90 out of 107) have not resulted in a closed trade yet. 
+
+---
+
+## Summary & Insights
+
+1. Approved Signals Do NOT Guarantee Profit: While the majority of closed trades from approved signals were profitable (76.4% win rate on closed approved signals), there are still instances (4 trades) where an approved signal resulted in a loss.
+2. Winning Trades Do NOT Require Approval: There are instances where trades resulted in a profit even though the underlying signal was not formally marked as APPROVED (4 winning trades).
+3. Low Execution/Completion Rate: A significant portion of your approved signals (90 out of 107) are not contributing to the closed PnL yet. Investigating why these signals are not executing or closing might help improve overall trading frequency.
