@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { getDb } from '@/lib/mongodb';
 import { auth } from '@/lib/auth';
 import { marketDataService } from '@/services/market-data';
-import { redis } from '@/lib/redis';
+import { safeRedis } from '@/lib/redis';
 
 interface BinanceTicker {
   symbol: string;
@@ -25,7 +25,7 @@ export async function GET() {
     let assetList = rawAssets.map(doc => ({ id: doc._id.toString(), ...doc } as any));
 
     if (assetList.length === 0) {
-      const redisSymbols = await redis.hkeys('market:ticker').catch(() => []);
+      const redisSymbols = await safeRedis(r => r.hkeys('market:ticker'), [] as string[]);
       const fallbackSymbols = redisSymbols.length > 0
         ? redisSymbols
         : ['BTCUSDT', 'ETHUSDT', 'ADAUSDT', 'SOLUSDT', 'XRPUSDT', 'BNBUSDT'];

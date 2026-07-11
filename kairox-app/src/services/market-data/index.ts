@@ -1,5 +1,5 @@
 import { getDb } from '@/lib/mongodb';
-import { redis } from '@/lib/redis';
+import { safeRedis } from '@/lib/redis';
 import { binanceWS, NormalizedCandle } from './binance';
 import { paperTradingService } from '../paper-trading';
 
@@ -97,7 +97,7 @@ export class MarketDataService {
    */
   async getLatestPrice(symbol: string): Promise<number | null> {
     try {
-      const priceStr = await redis.hget('market:ticker', symbol);
+      const priceStr = await safeRedis(r => r.hget('market:ticker', symbol), null);
       if (priceStr) return parseFloat(priceStr);
 
       // Fallback to REST API if not in cache (e.g. symbol not actively streamed)

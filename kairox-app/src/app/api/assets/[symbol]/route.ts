@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getDb } from '@/lib/mongodb';
 import { auth } from '@/lib/auth';
-import { redis } from '@/lib/redis';
+import { safeRedis } from '@/lib/redis';
 import { ObjectId } from 'mongodb';
 
 export async function GET(
@@ -42,7 +42,7 @@ export async function GET(
     }));
 
     // Get latest price from Redis
-    const priceStr = await redis.hget('market:ticker', symbol.toUpperCase());
+    const priceStr = await safeRedis(r => r.hget('market:ticker', symbol.toUpperCase()), null);
     const currentPrice = priceStr ? parseFloat(priceStr) : (candles.length > 0 ? candles[candles.length - 1].close : 0);
 
     // Get recent signals for this asset

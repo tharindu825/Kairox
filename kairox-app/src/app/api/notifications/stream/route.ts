@@ -1,28 +1,42 @@
 import { NextResponse } from 'next/server';
-import { redis } from '@/lib/redis';
 import Redis from 'ioredis';
-
-// Use a separate connection for subscribing
-const subscriber = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
 
 const clients = new Set<ReadableStreamDefaultController>();
 
-subscriber.subscribe('kairox:notifications', (err, count) => {
-  if (err) {
-    console.error('[SSE] Failed to subscribe to notifications channel:', err);
-  }
-});
+// Only set up Redis subscriber when Redis is available (local dev / worker mode).
+// On Vercel (serverless), Redis pub/sub isn't supported.
+let subscriberReady = false;
 
-subscriber.on('message', (channel, message) => {
-  if (channel === 'kairox:notifications') {
-    try {
-      const data = JSON.parse(message);
-      notifyClients(data);
-    } catch (err) {
-      console.error('[SSE] Failed to parse notification message:', err);
-    }
+if (process.env.REDIS_URL || process.env.NODE_ENV !== 'production') {
+  try {
+    const subscriber = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
+
+    subscriber.subscribe('kairox:notifications', (err, count) => {
+      if (err) {
+        console.error('[SSE] Failed to subscribe to notifications channel:', err);
+      } else {
+        subscriberReady = true;
+      }
+    });
+
+    subscriber.on('message', (channel, message) => {
+      if (channel === 'kairox:notifications') {
+        try {
+          const data = JSON.parse(message);
+          notifyClients(data);
+        } catch (err) {
+          console.error('[SSE] Failed to parse notification message:', err);
+        }
+      }
+    });
+
+    subscriber.on('error', (err) => {
+      console.warn('[SSE] Redis subscriber error:', err.message);
+    });
+  } catch (err) {
+    console.warn('[SSE] Could not set up Redis subscriber — notifications will be limited.');
   }
-});
+}
 
 export function notifyClients(data: any) {
   const message = `data: ${JSON.stringify(data)}\n\n`;
@@ -81,3 +95,4 @@ export async function GET() {
     },
   });
 }
+
