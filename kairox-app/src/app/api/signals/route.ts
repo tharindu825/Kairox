@@ -107,7 +107,7 @@ export async function POST(request: Request) {
       const queuedSymbols: string[] = [];
       for (const candidate of candidates) {
         const { symbol: s, candle: c } = candidate;
-        await redis.set(`market:${s}:${timeframe}:latest`, JSON.stringify(c));
+        await redis?.set(`market:${s}:${timeframe}:latest`, JSON.stringify(c));
         await signalQueue.add('generate-signal', { candle: c });
         queuedSymbols.push(s);
       }
@@ -130,7 +130,7 @@ export async function POST(request: Request) {
         );
       }
       candle = candles[candles.length - 1];
-      await redis.set(`market:${symbol}:${timeframe}:latest`, JSON.stringify(candle));
+      await redis?.set(`market:${symbol}:${timeframe}:latest`, JSON.stringify(candle));
       await signalQueue.add('generate-signal', { candle });
 
       return NextResponse.json(

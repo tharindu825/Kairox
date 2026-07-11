@@ -156,11 +156,11 @@ export class BinanceWebSocketClient extends EventEmitter {
     const key = `market:${candle.symbol}:${candle.timeframe}:latest`;
     
     // Store latest state of the current candle
-    await redis.set(key, JSON.stringify(candle));
+    await redis?.set(key, JSON.stringify(candle));
 
     // Also update a quick-access ticker key for the dashboard
     if (candle.timeframe === '1h') { // Just use 1h for dashboard ticker updates
-      await redis.hset('market:ticker', {
+      await redis?.hset('market:ticker', {
         [candle.symbol]: candle.close.toString()
       });
     }

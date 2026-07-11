@@ -50,7 +50,7 @@ export function startAutoSignalGeneration(): () => void {
         console.log('[Auto Signals] No candidate passed filters in this cycle.');
       } else {
         for (const candidate of candidates) {
-          await redis.set(`market:${candidate.symbol}:${timeframe}:latest`, JSON.stringify(candidate.candle));
+          await redis?.set(`market:${candidate.symbol}:${timeframe}:latest`, JSON.stringify(candidate.candle));
           await signalQueue.add('generate-signal', { candle: candidate.candle });
           console.log(
             `[Auto Signals] Queued ${candidate.symbol} (${timeframe}) | side=${candidate.inferredSide} | score=${candidate.score.toFixed(4)}`
