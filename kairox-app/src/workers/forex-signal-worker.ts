@@ -59,11 +59,14 @@ function buildForexTelegramMessage(
   }
 
   return [
-    `#${sym}  ${orderLabel[orderType]} Trade ${fp(entry)}`,
-    '',
-    `SL : ${fp(stopLoss)}`,
-    '',
-    tpLines.join('\n'),
+    `🚨 NEW APPROVED SIGNAL 🚨`,
+    ``,
+    `Type: Forex`,
+    `Asset: ${sym}`,
+    `Order: ${orderLabel[orderType]}`,
+    `Entry: ${fp(entry)}`,
+    `Stop: ${fp(stopLoss)}`,
+    ...tpLines,
   ].join('\n');
 }
 

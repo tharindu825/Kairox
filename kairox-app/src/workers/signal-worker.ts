@@ -378,9 +378,24 @@ async function signalJobHandler(data: SignalJobData) {
       // 8. Dispatch Alert if Approved (agreed or high-confidence primary-only)
       if (signalStatus === 'APPROVED' && (isAgreement || (isPrimaryOnly && primarySignal.winProbability >= 0.70))) {
         const agreementLabel = isAgreement ? '✅ Agree' : '⚠️ Primary Only (high confidence)';
+        const riskNote = riskAssessment.verdict === 'REDUCED' ? '⚠️ REDUCED SIZE (High Risk Trade)' : '✅ NORMAL';
+        
+        const message = `🚨 NEW APPROVED SIGNAL 🚨\n\n` +
+          `Type: Cryptocurrency\n` +
+          `Asset: ${candle.symbol}\n` +
+          `Side: ${primarySignal.side}\n` +
+          `Win Prob: ${(primarySignal.winProbability * 100).toFixed(0)}%\n` +
+          `Entry: ${primarySignal.entry}\n` +
+          `Target: ${primarySignal.targets[0]?.price}\n` +
+          `Stop: ${primarySignal.stopLoss}\n` +
+          `R:R: ${riskAssessment.rewardToRisk.toFixed(2)}\n` +
+          `Size: ${executionSize.toFixed(4)} units\n` +
+          `Risk: ${riskNote}\n\n` +
+          `Models: ${agreementLabel}`;
+
         await alertQueue.add('send-telegram', {
           signalId: signalRecord.id,
-          message: `🚨 NEW APPROVED SIGNAL 🚨\n\nAsset: ${candle.symbol}\nSide: ${primarySignal.side}\nWin Prob: ${(primarySignal.winProbability * 100).toFixed(0)}%\nEntry: ${primarySignal.entry}\nStop: ${primarySignal.stopLoss}\nTarget: ${primarySignal.targets[0]?.price}\nR:R: ${riskAssessment.rewardToRisk.toFixed(2)}\nSize: ${executionSize.toFixed(4)} units\n\nModels: ${agreementLabel}`
+          message: message
         });
       }
 
