@@ -1,5 +1,4 @@
-import { Worker, Job } from 'bullmq';
-import { createBullMQConnection } from '@/lib/redis';
+import { registerQueueHandler } from './queues';
 import { getDb } from '@/lib/mongodb';
 import { ObjectId } from 'mongodb';
 import { Logger } from '@/lib/logger';
@@ -134,10 +133,8 @@ async function getPortfolioState(): Promise<PortfolioState> {
 
 // ── Worker ────────────────────────────────────────────────────────────────────
 
-export const forexSignalWorker = new Worker(
-  'forex-signal-generation',
-  async (job: Job<ForexSignalJobData>) => {
-    const { candle, displaySymbol } = job.data;
+async function forexSignalJobHandler(data: ForexSignalJobData) {
+  const { candle, displaySymbol } = data;
     await Logger.info(`[Forex] Processing ${candle.symbol} (${candle.timeframe})`, 'Forex Signal Worker');
 
     try {
@@ -359,10 +356,13 @@ export const forexSignalWorker = new Worker(
       console.error(`[Forex Signal Worker] Error:`, error);
       throw error;
     }
-  },
-  { connection: createBullMQConnection() }
-);
+}
 
-forexSignalWorker.on('failed', (job: Job<ForexSignalJobData> | undefined, err: Error) => {
-  console.error(`[Forex Signal Worker] Job ${job?.id} failed:`, err);
-});
+/** No-op close for compatibility with worker-entry.ts */
+export const forexSignalWorker = {
+  name: 'forex-signal-generation',
+  close: async () => {},
+};
+
+// Register handler with the in-process queue shim
+registerQueueHandler('forex-signal-generation', forexSignalJobHandler);

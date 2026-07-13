@@ -1,4 +1,3 @@
-import { redis } from '@/lib/redis';
 import { forexSignalQueue } from '@/workers/queues';
 import { selectBestForexCandidate } from './forex-auto-selector';
 import { toTwelveSymbol } from '@/services/market-data/twelve-data';
@@ -76,7 +75,6 @@ export function startAutoForexSignalGeneration(): () => void {
       } else {
         for (const { symbol, candle, inferredSide, score } of candidates) {
           const displaySymbol = toTwelveSymbol(symbol); // e.g. "XAU/USD"
-          await redis.set(`market:${symbol}:${timeframe}:latest`, JSON.stringify(candle));
           await forexSignalQueue.add('generate-forex-signal', { candle, displaySymbol });
           console.log(
             `[Forex Auto Signals] Queued ${displaySymbol} (${timeframe}) | side=${inferredSide} | score=${score.toFixed(4)}`

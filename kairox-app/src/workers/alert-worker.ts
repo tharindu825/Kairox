@@ -1,15 +1,12 @@
-import { Worker, Job } from 'bullmq';
-import { createBullMQConnection } from '@/lib/redis';
+import { registerQueueHandler } from './queues';
 
 export interface AlertJobData {
   signalId?: string;
   message: string;
 }
 
-export const alertWorker = new Worker(
-  'alerts',
-  async (job: Job<AlertJobData>) => {
-    const { message, signalId } = job.data;
+async function alertJobHandler(data: AlertJobData): Promise<any> {
+    const { message, signalId } = data;
     console.log(`[Alert Worker] Processing alert for signal ${signalId || 'system'}`);
 
     try {
@@ -49,10 +46,13 @@ export const alertWorker = new Worker(
       console.error(`[Alert Worker] Failed to send alert:`, error);
       throw error;
     }
-  },
-  { connection: createBullMQConnection() }
-);
+}
 
-alertWorker.on('failed', (job: Job<AlertJobData> | undefined, err: Error) => {
-  console.error(`[Alert Worker] Job ${job?.id} failed:`, err);
-});
+/** No-op close for compatibility with worker-entry.ts */
+export const alertWorker = {
+  name: 'alerts',
+  close: async () => {},
+};
+
+// Register handler with the in-process queue shim
+registerQueueHandler('alerts', alertJobHandler);

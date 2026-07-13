@@ -1,17 +1,36 @@
-import { Queue } from 'bullmq';
-import { createBullMQConnection } from '@/lib/redis';
+/**
+ * Queue shim — replaces BullMQ queues with direct in-process function calls.
+ * No Redis required.
+ */
 
-// Queue for processing indicators and generating crypto signals
-export const signalQueue = new Queue('signal-generation', { 
-  connection: createBullMQConnection()
-});
+type JobHandler = (data: any) => Promise<any>;
 
-// Queue for processing forex signals
-export const forexSignalQueue = new Queue('forex-signal-generation', {
-  connection: createBullMQConnection()
-});
+const handlers: Record<string, JobHandler> = {};
 
-// Queue for alerts (Telegram, etc)
-export const alertQueue = new Queue('alerts', {
-  connection: createBullMQConnection()
-});
+/** Register a handler for a named queue */
+export function registerQueueHandler(queueName: string, handler: JobHandler) {
+  handlers[queueName] = handler;
+}
+
+function makeQueue(queueName: string) {
+  return {
+    name: queueName,
+    add: async (_jobName: string, data: any) => {
+      const handler = handlers[queueName];
+      if (handler) {
+        // Fire-and-forget — mirrors BullMQ async behaviour
+        handler(data).catch((err: Error) =>
+          console.error(`[Queue:${queueName}] Handler error:`, err)
+        );
+      } else {
+        console.warn(`[Queue:${queueName}] No handler registered — dropping job "${_jobName}"`);
+      }
+      return { id: `local-${Date.now()}` };
+    },
+    close: async () => {},
+  };
+}
+
+export const signalQueue     = makeQueue('signal-generation');
+export const forexSignalQueue = makeQueue('forex-signal-generation');
+export const alertQueue      = makeQueue('alerts');

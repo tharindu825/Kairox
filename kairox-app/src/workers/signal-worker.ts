@@ -1,5 +1,4 @@
-import { Worker, Job } from 'bullmq';
-import { createBullMQConnection } from '@/lib/redis';
+import { registerQueueHandler } from './queues';
 import { getDb } from '@/lib/mongodb';
 import { ObjectId } from 'mongodb';
 import { Logger } from '@/lib/logger';
@@ -98,10 +97,8 @@ async function getPortfolioState(): Promise<PortfolioState> {
   };
 }
 
-export const signalWorker = new Worker(
-  'signal-generation',
-  async (job: Job<SignalJobData>) => {
-    const { candle } = job.data;
+async function signalJobHandler(data: SignalJobData) {
+    const { candle } = data;
     await Logger.info(`Processing new candle for ${candle.symbol} (${candle.timeframe})`, 'Signal Worker');
 
     try {
@@ -399,10 +396,13 @@ export const signalWorker = new Worker(
       console.error(`[Signal Worker] Error processing job:`, error);
       throw error;
     }
-  },
-  { connection: createBullMQConnection() }
-);
+}
 
-signalWorker.on('failed', (job: Job<SignalJobData> | undefined, err: Error) => {
-  console.error(`[Signal Worker] Job ${job?.id} failed:`, err);
-});
+/** No-op close for compatibility with worker-entry.ts */
+export const signalWorker = {
+  name: 'signal-generation',
+  close: async () => {},
+};
+
+// Register handler with the in-process queue shim
+registerQueueHandler('signal-generation', signalJobHandler);
