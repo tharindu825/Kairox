@@ -2,6 +2,7 @@ import { getDb } from '@/lib/mongodb';
 import { IndicatorService } from '@/services/indicators';
 import { SmartMoneyService } from '@/services/indicators/smc-service';
 import { getCurrentForexSession } from '@/services/ai/forex-openrouter-service';
+import { getForexRegime } from '@/services/signals/regime-service';
 import { yahooFinanceService } from '@/services/market-data/yahoo-finance';
 import { twelveDataService } from '@/services/market-data/twelve-data';
 import type { NormalizedCandle } from '@/services/market-data/binance';
@@ -152,6 +153,49 @@ async function scoreForexCandidate(symbol: string, timeframe: string): Promise<F
   const isAudNzd = symbol.includes('AUD') || symbol.includes('NZD');
   if (currentSession === 'SYDNEY' && !isAudNzd) {
     return null; // Blackout period for EUR, GBP, USD, etc.
+  }
+
+  // ── SuperTrend Veto ───────────────────────────────────────────────────────────
+  // Never take a LONG if SuperTrend is RED; never take a SHORT if SuperTrend is GREEN.
+  if (inferredSide === 'LONG' && features.superTrend === 'RED') return null;
+  if (inferredSide === 'SHORT' && features.superTrend === 'GREEN') return null;
+
+  // ── ADX Directional Confirmation (+DI / -DI) ─────────────────────────────────
+  // Require directional momentum to agree with trade direction.
+  if (features.adx >= 20) {
+    if (inferredSide === 'LONG' && features.plusDI <= features.minusDI) return null;
+    if (inferredSide === 'SHORT' && features.minusDI <= features.plusDI) return null;
+  }
+
+  // ── DXY Macro Regime Filter ──────────────────────────────────────────────────
+  // STRONG_USD: DXY is trending up — avoid shorting USD pairs (e.g. EURUSD LONG is risky).
+  // WEAK_USD:   DXY is trending down — avoid longing USD pairs (e.g. USDJPY LONG is risky).
+  // For XAU/XAG: USD strength is bearish for gold/silver.
+  const isUsdBase  = symbol.startsWith('USD');  // USDJPY, USDCHF, USDCAD
+  const isUsdQuote = symbol.endsWith('USD') && !symbol.startsWith('XAU') && !symbol.startsWith('XAG'); // EURUSD, GBPUSD, AUDUSD
+  const isGold     = symbol.startsWith('XAU') || symbol.startsWith('XAG');
+
+  try {
+    const dxyRegime = await getForexRegime();
+
+    if (dxyRegime === 'STRONG_USD') {
+      // Shorting USD (e.g. USDJPY SHORT) is counter to macro — block
+      if (isUsdBase && inferredSide === 'SHORT') return null;
+      // Longing pairs priced in USD (EURUSD LONG = betting against USD) — block
+      if (isUsdQuote && inferredSide === 'LONG') return null;
+      // Gold LONGs also fight strong USD — block
+      if (isGold && inferredSide === 'LONG') return null;
+    }
+
+    if (dxyRegime === 'WEAK_USD') {
+      // Longing USD (e.g. USDJPY LONG) is counter to macro — block
+      if (isUsdBase && inferredSide === 'LONG') return null;
+      // Shorting pairs priced in USD (EURUSD SHORT = betting FOR USD) — block
+      if (isUsdQuote && inferredSide === 'SHORT') return null;
+    }
+  } catch (err) {
+    // Fail open — DXY data unavailability should never freeze signal generation
+    console.warn('[Forex Auto-Selector] DXY regime check failed (fail open):', (err as Error).message);
   }
 
   // Score components

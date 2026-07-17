@@ -30,7 +30,7 @@ export async function GET() {
         ? redisSymbols
         : ['BTCUSDT', 'ETHUSDT', 'ADAUSDT', 'SOLUSDT', 'XRPUSDT', 'BNBUSDT'];
 
-      assetList = fallbackSymbols.map((symbol) => ({
+      assetList = fallbackSymbols.map((symbol: string) => ({
         id: symbol,
         symbol,
         name: symbol.replace('USDT', ''),

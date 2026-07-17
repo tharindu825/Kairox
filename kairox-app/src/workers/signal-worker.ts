@@ -189,14 +189,39 @@ async function signalJobHandler(data: SignalJobData) {
       if (features.elliottWave?.currentWave) {
         await Logger.info(`[EW] ${candle.symbol}: Wave ${features.elliottWave.currentWave.number} (${features.elliottWave.currentWave.type} ${features.elliottWave.currentWave.direction}) confidence=${(features.elliottWave.currentWave.confidence * 100).toFixed(0)}%`, 'Signal Worker');
       }
-      await Logger.info(`[Indicators] ${candle.symbol}: ADX=${features.adx.toFixed(1)} | StochRSI K=${features.stochRsi.k.toFixed(1)} D=${features.stochRsi.d.toFixed(1)} | Volatility=${features.volatilityRegime}`, 'Signal Worker');
+      await Logger.info(`[Indicators] ${candle.symbol}: ADX=${features.adx.toFixed(1)} | StochRSI K=${features.stochRsi.k.toFixed(1)} D=${features.stochRsi.d.toFixed(1)} | Volatility=${features.volatilityRegime} | SuperTrend=${features.superTrend}`, 'Signal Worker');
 
       // Allow AI to evaluate even neutral markets (SMC might detect structure)
       if (features.trend === 'NEUTRAL') {
         await Logger.info(`Market is NEUTRAL for ${candle.symbol} — Proceeding with AI evaluation (SMC/EW may provide direction).`, 'Signal Worker');
       }
 
-      // 2. Dual API Model Execution (Run concurrently)
+      // ── Deterministic SMC Counter-Trend Pre-Filter ───────────────────────────────
+      // If SMC structure is BEARISH, any BULLISH AI signal is counter-trend.
+      // Only allow it when there is a confirmed CHoCH on the execution timeframe
+      // (which signals a structural reversal, not a fakeout).
+      // This is a deterministic check — no AI overrides allowed here.
+      if (features.smc?.structureTrend) {
+        const smcTrend = features.smc.structureTrend; // 'BULLISH' | 'BEARISH' | 'RANGING'
+        const choch    = features.smc.lastCHoCH;
+        const recentChoCH = choch && choch.candlesAgo <= 10;
+
+        if (smcTrend === 'BEARISH' && !recentChoCH) {
+          // SMC structure is bearish and no CHoCH — block LONG pre-emptively
+          // (we don't know the AI side yet, but we flag this for the AI prompt)
+          await Logger.info(`[SMC Pre-Filter] ${candle.symbol}: BEARISH structure, no CHoCH — LONG entries blocked.`, 'Signal Worker');
+          // Tag features so the AI knows the hard constraint
+          if (!features.marketContext) features.marketContext = {};
+          (features.marketContext as any).smcLongBlocked = true;
+        }
+        if (smcTrend === 'BULLISH' && !recentChoCH) {
+          await Logger.info(`[SMC Pre-Filter] ${candle.symbol}: BULLISH structure, no CHoCH — SHORT entries blocked.`, 'Signal Worker');
+          if (!features.marketContext) features.marketContext = {};
+          (features.marketContext as any).smcShortBlocked = true;
+        }
+      }
+
+
       await Logger.info(`Requesting AI analysis for ${candle.symbol}...`, 'Signal Worker');
       const [primaryResult, confirmationResult] = await Promise.all([
         openRouterService.generateCompletion(candle.symbol, candle.timeframe, features),
@@ -218,6 +243,22 @@ async function signalJobHandler(data: SignalJobData) {
       // we force the entry price to be the current candle close price. 
       if (primarySignal.side !== 'HOLD') {
         primarySignal.entry = candle.close;
+      }
+
+      // ── Enforce SMC Counter-Trend Block ──────────────────────────────────────────
+      // If the AI returned a direction that violates the SMC structural constraint
+      // flagged above (bearish structure + no CHoCH → no LONGs allowed), hard-block it.
+      // This makes the SMC filter deterministic, not just advisory.
+      const smcLongBlocked  = (features.marketContext as any)?.smcLongBlocked  === true;
+      const smcShortBlocked = (features.marketContext as any)?.smcShortBlocked === true;
+
+      if (primarySignal.side === 'LONG' && smcLongBlocked) {
+        await Logger.info(`[SMC Enforce] ${candle.symbol}: AI returned LONG but SMC is BEARISH with no CHoCH — overriding to HOLD.`, 'Signal Worker');
+        return { status: 'skipped', reason: 'smc_counter_trend_long' };
+      }
+      if (primarySignal.side === 'SHORT' && smcShortBlocked) {
+        await Logger.info(`[SMC Enforce] ${candle.symbol}: AI returned SHORT but SMC is BULLISH with no CHoCH — overriding to HOLD.`, 'Signal Worker');
+        return { status: 'skipped', reason: 'smc_counter_trend_short' };
       }
 
       // 1b. Active Trade Check & Trend Reversal Warning

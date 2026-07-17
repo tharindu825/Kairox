@@ -21,6 +21,9 @@ export interface FeatureBundle {
   // ── New: Accuracy Improvements ──────────────────────────────────────────────
   /** Average Directional Index — 0-100 trend strength (>25 = trending) */
   adx: number;
+  /** ADX Directional Indicators — plusDI for bullish momentum, minusDI for bearish */
+  plusDI: number;
+  minusDI: number;
   /** Stochastic RSI — %K and %D oscillator (0-100) */
   stochRsi: { k: number; d: number };
   /** Volatility regime based on ATR percentile vs 50-period average */
@@ -43,6 +46,10 @@ export interface FeatureBundle {
 
   // ── Volume Profile ──────────────────────────────────────────────────────────
   vp: VolumeProfileResult | null;
+
+  // ── SuperTrend ──────────────────────────────────────────────────────────────
+  /** SuperTrend direction: GREEN = price above band (uptrend), RED = below (downtrend) */
+  superTrend: 'GREEN' | 'RED';
 }
 
 // ─── Internal State ─────────────────────────────────────────────────────────────
@@ -211,8 +218,8 @@ export class IndicatorService {
       }
     }
 
-    // ── New: ADX ────────────────────────────────────────────────────────────
-    const adx = this.calculateADX(state.candleBuffer);
+    // ── New: ADX with Directional Movement ─────────────────────────────────
+    const { adx, plusDI, minusDI } = this.calculateADX(state.candleBuffer);
 
     // ── New: Stochastic RSI ─────────────────────────────────────────────────
     const stochRsi = this.calculateStochRSI(state.rsiBuffer);
@@ -248,9 +255,12 @@ export class IndicatorService {
       console.warn('[Indicator Service] Elliott Wave analysis failed:', (err as Error).message);
     }
 
-    // ── New: Volume Profile ───────────────────────────────────────────────────
+    // ── New: Volume Profile ─────────────────────────────────────
     const vpService = new VolumeProfileService();
     const vp = vpService.calculate(candles);
+
+    // ── New: SuperTrend ───────────────────────────────────────────────────
+    const superTrend = this.calculateSuperTrend(candles);
 
     return {
       rsi: Number(rsiVal || 50),
@@ -264,6 +274,8 @@ export class IndicatorService {
       trend: this.calculateTrend(currentCandle.close, Number(ema20Val), Number(ema50Val), Number(ema200Val)),
       closePrice: currentCandle.close,
       adx,
+      plusDI,
+      minusDI,
       stochRsi,
       volatilityRegime,
       recentCandles,
@@ -271,6 +283,7 @@ export class IndicatorService {
       elliottWave,
       marketContext: {},
       vp,
+      superTrend,
     };
   }
 
@@ -279,10 +292,11 @@ export class IndicatorService {
   /**
    * Average Directional Index — measures trend strength (0-100).
    * >25 = trending, >50 = strong trend, <20 = ranging.
+   * Returns adx scalar, plusDI (bullish pressure), and minusDI (bearish pressure).
    * Computed from +DI/-DI using candle high/low/close data.
    */
-  private calculateADX(candles: NormalizedCandle[]): number {
-    if (candles.length < ADX_PERIOD + 1) return 0;
+  private calculateADX(candles: NormalizedCandle[]): { adx: number; plusDI: number; minusDI: number } {
+    if (candles.length < ADX_PERIOD + 1) return { adx: 0, plusDI: 0, minusDI: 0 };
 
     const plusDMs: number[] = [];
     const minusDMs: number[] = [];
@@ -306,7 +320,7 @@ export class IndicatorService {
       trs.push(Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose)));
     }
 
-    if (plusDMs.length < ADX_PERIOD) return 0;
+    if (plusDMs.length < ADX_PERIOD) return { adx: 0, plusDI: 0, minusDI: 0 };
 
     // Smoothed averages using Wilder's method
     let smoothedPlusDM = plusDMs.slice(0, ADX_PERIOD).reduce((a, b) => a + b, 0);
@@ -314,21 +328,24 @@ export class IndicatorService {
     let smoothedTR = trs.slice(0, ADX_PERIOD).reduce((a, b) => a + b, 0);
 
     const dxValues: number[] = [];
+    let lastPlusDI = 0;
+    let lastMinusDI = 0;
 
     for (let i = ADX_PERIOD; i < plusDMs.length; i++) {
       smoothedPlusDM = smoothedPlusDM - (smoothedPlusDM / ADX_PERIOD) + plusDMs[i];
       smoothedMinusDM = smoothedMinusDM - (smoothedMinusDM / ADX_PERIOD) + minusDMs[i];
       smoothedTR = smoothedTR - (smoothedTR / ADX_PERIOD) + trs[i];
 
-      const plusDI = smoothedTR > 0 ? (smoothedPlusDM / smoothedTR) * 100 : 0;
-      const minusDI = smoothedTR > 0 ? (smoothedMinusDM / smoothedTR) * 100 : 0;
-      const diSum = plusDI + minusDI;
-      const dx = diSum > 0 ? (Math.abs(plusDI - minusDI) / diSum) * 100 : 0;
+      lastPlusDI = smoothedTR > 0 ? (smoothedPlusDM / smoothedTR) * 100 : 0;
+      lastMinusDI = smoothedTR > 0 ? (smoothedMinusDM / smoothedTR) * 100 : 0;
+      const diSum = lastPlusDI + lastMinusDI;
+      const dx = diSum > 0 ? (Math.abs(lastPlusDI - lastMinusDI) / diSum) * 100 : 0;
       dxValues.push(dx);
     }
 
     if (dxValues.length < ADX_PERIOD) {
-      return dxValues.length > 0 ? dxValues[dxValues.length - 1] : 0;
+      const adxVal = dxValues.length > 0 ? dxValues[dxValues.length - 1] : 0;
+      return { adx: adxVal, plusDI: Math.round(lastPlusDI * 100) / 100, minusDI: Math.round(lastMinusDI * 100) / 100 };
     }
 
     // Smooth DX values to get ADX (Wilder's smoothing)
@@ -337,7 +354,11 @@ export class IndicatorService {
       adx = ((adx * (ADX_PERIOD - 1)) + dxValues[i]) / ADX_PERIOD;
     }
 
-    return Math.round(adx * 100) / 100;
+    return {
+      adx: Math.round(adx * 100) / 100,
+      plusDI: Math.round(lastPlusDI * 100) / 100,
+      minusDI: Math.round(lastMinusDI * 100) / 100,
+    };
   }
 
   // ── Stochastic RSI Calculation ────────────────────────────────────────────
@@ -435,6 +456,85 @@ export class IndicatorService {
     if (close < ema20 && ema20 < ema50 && ema50 < ema200) return 'STRONG_BEAR';
     if (close < ema50 && ema50 < ema200) return 'BEAR';
     return 'NEUTRAL';
+  }
+
+  // ── SuperTrend Calculation ───────────────────────────────────────────────────
+
+  /**
+   * ATR-based SuperTrend indicator.
+   * Period = 10, Multiplier = 3.0 (widely-used defaults for trend following).
+   *
+   * Returns 'GREEN' when price is above the upper band (uptrend),
+   * and 'RED' when price is below the lower band (downtrend).
+   *
+   * SuperTrend is significantly better than EMA stacking at filtering
+   * choppy/sideways markets where moving averages produce false crossovers.
+   */
+  private calculateSuperTrend(
+    candles: NormalizedCandle[],
+    period = 10,
+    multiplier = 3.0,
+  ): 'GREEN' | 'RED' {
+    if (candles.length < period + 1) return 'GREEN'; // default to uptrend if insufficient data
+
+    // Compute ATR values using a simple rolling average (Wilder not required here)
+    const trValues: number[] = [];
+    for (let i = 1; i < candles.length; i++) {
+      const { high, low } = candles[i];
+      const prevClose = candles[i - 1].close;
+      trValues.push(Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose)));
+    }
+
+    // Use Wilder's smoothed ATR (same as the main ATR indicator)
+    let atr = trValues.slice(0, period).reduce((a, b) => a + b, 0) / period;
+    const atrValues: number[] = [atr];
+    for (let i = period; i < trValues.length; i++) {
+      atr = ((atr * (period - 1)) + trValues[i]) / period;
+      atrValues.push(atr);
+    }
+
+    // Compute SuperTrend bands from candle index `period` onward
+    // (because we need one ATR value per candle starting at index `period`)
+    let direction: 'GREEN' | 'RED' = 'GREEN';
+    let prevUpperBand = 0;
+    let prevLowerBand = 0;
+
+    for (let i = 0; i < atrValues.length; i++) {
+      const candleIdx = i + period; // offset because atrValues[0] corresponds to candle[period]
+      if (candleIdx >= candles.length) break;
+
+      const c = candles[candleIdx];
+      const hl2 = (c.high + c.low) / 2;
+      const currentATR = atrValues[i];
+
+      const basicUpper = hl2 + multiplier * currentATR;
+      const basicLower = hl2 - multiplier * currentATR;
+
+      // Clamp bands: upper band can only decrease; lower band can only increase
+      const upperBand = (i === 0 || basicUpper < prevUpperBand || candles[candleIdx - 1].close > prevUpperBand)
+        ? basicUpper
+        : prevUpperBand;
+
+      const lowerBand = (i === 0 || basicLower > prevLowerBand || candles[candleIdx - 1].close < prevLowerBand)
+        ? basicLower
+        : prevLowerBand;
+
+      // Determine direction
+      if (i === 0) {
+        direction = c.close > upperBand ? 'GREEN' : 'RED';
+      } else {
+        if (direction === 'RED' && c.close > upperBand) {
+          direction = 'GREEN';
+        } else if (direction === 'GREEN' && c.close < lowerBand) {
+          direction = 'RED';
+        }
+      }
+
+      prevUpperBand = upperBand;
+      prevLowerBand = lowerBand;
+    }
+
+    return direction;
   }
 }
 

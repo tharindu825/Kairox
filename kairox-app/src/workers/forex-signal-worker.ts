@@ -206,9 +206,29 @@ async function forexSignalJobHandler(data: ForexSignalJobData) {
       const features = indicatorSvc.getEnhancedFeatureBundle(candleHistory);
 
       await Logger.info(
-        `[Forex] ${candle.symbol}: ADX=${features.adx.toFixed(1)} | RSI=${features.rsi.toFixed(1)} | Trend=${features.trend}`,
+        `[Forex] ${candle.symbol}: ADX=${features.adx.toFixed(1)} | RSI=${features.rsi.toFixed(1)} | Trend=${features.trend} | SuperTrend=${features.superTrend}`,
         'Forex Signal Worker'
       );
+
+      // ── Deterministic SMC Counter-Trend Pre-Filter ───────────────────────────────
+      // If SMC structure is BEARISH and there is no confirmed CHoCH, block LONG setups.
+      // This is deterministic — the AI cannot override structural SMC bias.
+      if (features.smc?.structureTrend) {
+        const smcTrend    = features.smc.structureTrend;
+        const choch       = features.smc.lastCHoCH;
+        const recentChoCH = choch && choch.candlesAgo <= 10;
+
+        if (smcTrend === 'BEARISH' && !recentChoCH) {
+          await Logger.info(`[Forex SMC Pre-Filter] ${candle.symbol}: BEARISH structure, no CHoCH — LONG entries blocked.`, 'Forex Signal Worker');
+          if (!features.marketContext) features.marketContext = {};
+          (features.marketContext as any).smcLongBlocked = true;
+        }
+        if (smcTrend === 'BULLISH' && !recentChoCH) {
+          await Logger.info(`[Forex SMC Pre-Filter] ${candle.symbol}: BULLISH structure, no CHoCH — SHORT entries blocked.`, 'Forex Signal Worker');
+          if (!features.marketContext) features.marketContext = {};
+          (features.marketContext as any).smcShortBlocked = true;
+        }
+      }
 
       // ── 3. Dual AI model execution ─────────────────────────────────────────
       await Logger.info(`[Forex] Requesting AI analysis for ${candle.symbol}...`, 'Forex Signal Worker');
@@ -222,6 +242,19 @@ async function forexSignalJobHandler(data: ForexSignalJobData) {
 
       const primarySignal = primaryResult.data;
       const confSignal    = confirmResult.data;
+
+      // ── Enforce SMC Counter-Trend Block ───────────────────────────────────────────────────
+      const smcLongBlocked  = (features.marketContext as any)?.smcLongBlocked  === true;
+      const smcShortBlocked = (features.marketContext as any)?.smcShortBlocked === true;
+
+      if (primarySignal.side === 'LONG' && smcLongBlocked) {
+        await Logger.info(`[Forex SMC Enforce] ${candle.symbol}: AI returned LONG but SMC is BEARISH with no CHoCH — blocking.`, 'Forex Signal Worker');
+        return { status: 'skipped', reason: 'smc_counter_trend_long' };
+      }
+      if (primarySignal.side === 'SHORT' && smcShortBlocked) {
+        await Logger.info(`[Forex SMC Enforce] ${candle.symbol}: AI returned SHORT but SMC is BULLISH with no CHoCH — blocking.`, 'Forex Signal Worker');
+        return { status: 'skipped', reason: 'smc_counter_trend_short' };
+      }
 
       // ── 4. Model agreement ────────────────────────────────────────────────
       const isAgreement = primarySignal.side === confSignal.side;

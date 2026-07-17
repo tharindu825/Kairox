@@ -1,6 +1,7 @@
 import { getDb } from '@/lib/mongodb';
 import { IndicatorService } from '@/services/indicators';
 import { SmartMoneyService } from '@/services/indicators/smc-service';
+import { getCryptoRegime } from '@/services/signals/regime-service';
 import type { NormalizedCandle } from '@/services/market-data/binance';
 import { binanceREST } from '@/services/market-data/binance-rest';
 
@@ -129,23 +130,22 @@ function passesIndicatorFilters(
     adx: number;
     volatilityRegime: string;
     volumeProfile: string;
-    smc?: { lastBOS?: unknown; nearestOB?: unknown } | null;
+    smc?: { lastBOS?: unknown; nearestOB?: unknown; lastCHoCH?: { side: string; candlesAgo: number } | null } | null;
   },
   close: number
 ): boolean {
-  // Only hard-gate on data quality and extreme risk — let the AI + risk engine handle directional filtering
+  // Data quality gate
   if (!Number.isFinite(features.atr) || features.atr <= 0) return false;
 
   // Skip EXTREME volatility — too risky for automated signals
   if (features.volatilityRegime === 'EXTREME') return false;
 
-  // Minimum trend strength — very flat markets rarely produce good signals
+  // Ranging market guard: very low ADX + low volatility = choppy noise, not a trend
+  if (features.adx < 18 && features.volatilityRegime === 'LOW') return false;
+
+  // Minimum trend strength — completely flat markets produce no useful signals
   if (features.adx < 10) return false;
 
-  // All other filters (MACD alignment, RSI range, EMA alignment, trend direction,
-  // volume profile) have been removed from the pre-selector. The AI model receives
-  // full indicator data and makes its own directional decision, and the risk engine
-  // validates R:R and EV before approving.
   return true;
 }
 
@@ -285,7 +285,37 @@ async function evaluateSymbol(
   if (sideFilter !== 'ALL' && sideFilter !== inferredSide) return null;
   if (!passesIndicatorFilters(inferredSide, features, latest.close)) return null;
 
-  // ── True MTF Alignment Check ──
+  // ── BTC Macro Regime Gate ───────────────────────────────────────────────────
+  // If BTC is in a macro bear trend, block all altcoin LONG signals.
+  // Altcoins are highly correlated to BTC; fighting BTC downtrend is the #1 loss cause.
+  // Skip this check for BTCUSDT itself (it IS the macro asset).
+  if (symbol !== 'BTCUSDT' && inferredSide === 'LONG') {
+    const btcRegime = await getCryptoRegime();
+    if (btcRegime === 'BEAR' || btcRegime === 'STRONG_BEAR') {
+      console.log(`[Auto-Selector] BTC regime=${btcRegime} — blocking LONG on ${symbol}`);
+      return null;
+    }
+  }
+
+  // ── SuperTrend Veto ───────────────────────────────────────────────────────────
+  // SuperTrend is significantly better than EMA stacking at identifying choppy markets.
+  // Never take a LONG if SuperTrend is RED; never take a SHORT if SuperTrend is GREEN.
+  if (inferredSide === 'LONG' && features.superTrend === 'RED') {
+    return null;
+  }
+  if (inferredSide === 'SHORT' && features.superTrend === 'GREEN') {
+    return null;
+  }
+
+  // ── ADX Directional Confirmation (+DI / -DI) ─────────────────────────────────
+  // ADX confirms trend strength; +DI vs -DI confirms direction.
+  // A LONG is only valid if bullish pressure (+DI) exceeds bearish (-DI) with trending ADX.
+  if (features.adx >= 20) {
+    if (inferredSide === 'LONG' && features.plusDI <= features.minusDI) return null;
+    if (inferredSide === 'SHORT' && features.minusDI <= features.plusDI) return null;
+  }
+
+
   // Calculate how many timeframes align with the inferred side
   let mtfScore = 0;
   let structuralConflict = false;
@@ -297,27 +327,40 @@ async function evaluateSymbol(
     if (inferredSide === 'LONG' && trend.includes('BULL')) mtfScore++;
     if (inferredSide === 'SHORT' && trend.includes('BEAR')) mtfScore++;
 
-    // Check for structural conflict (e.g. 15m LONG vs 1w/1d STRONG_BEAR)
+    // Structural conflict: daily/weekly macro trend opposes the inferred side.
+    // Guard against BEAR too (not just STRONG_BEAR) — any bearish daily trend
+    // is a significant headwind for longs (and vice versa for shorts).
     if (tf === '1w' || tf === '1d') {
-      if (inferredSide === 'LONG' && trend === 'STRONG_BEAR') structuralConflict = true;
-      if (inferredSide === 'SHORT' && trend === 'STRONG_BULL') structuralConflict = true;
+      if (inferredSide === 'LONG' && (trend === 'STRONG_BEAR' || trend === 'BEAR')) structuralConflict = true;
+      if (inferredSide === 'SHORT' && (trend === 'STRONG_BULL' || trend === 'BULL')) structuralConflict = true;
     }
   }
 
-  // Structural conflict is now a score penalty (-0.3) instead of a hard reject.
-  // This allows mean-reversion setups at key SMC levels while still deprioritising them.
+  // ── HARD MTF Structural Conflict Reject ──
+  // Trading against the Daily/Weekly macro trend is the #1 cause of losses.
+  // Hard-reject unless SMC has confirmed a Change of Character (CHoCH) on the
+  // execution timeframe — this enables mean-reversion only at key institutional levels.
+  if (structuralConflict) {
+    const choch = features.smc?.lastCHoCH;
+    const hasConfirmedChoCH =
+      choch &&
+      choch.candlesAgo <= 10 &&
+      ((inferredSide === 'LONG' && choch.side === 'BULL') ||
+       (inferredSide === 'SHORT' && choch.side === 'BEAR'));
+
+    if (!hasConfirmedChoCH) {
+      return null; // Hard reject — no trading against the macro trend without CHoCH
+    }
+  }
 
   const trendStrength = features.trend.startsWith('STRONG') ? 2 : 1;
 
   // Calculate SMC bonus for this candidate
   const smcBonus = calculateSMCBonus(execCandles, inferredSide);
 
-  // Add MTF alignment bonus to the score (e.g., up to 20% boost for 5/5 alignment)
+  // Add MTF alignment bonus to the score (up to 20% boost for 5/5 alignment)
   const mtfAlignmentRatio = mtfScore / mtfTimeframes.length;
   const mtfBonus = mtfAlignmentRatio * 0.2;
-
-  // Structural conflict penalty (instead of hard reject)
-  const conflictPenalty = structuralConflict ? -0.3 : 0;
 
   const score = scoreCandidate(
     latest,
@@ -326,7 +369,7 @@ async function evaluateSymbol(
     features.atr,
     features.adx,
     smcBonus,
-  ) + mtfBonus + conflictPenalty;
+  ) + mtfBonus;
 
   return {
     symbol,
