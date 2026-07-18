@@ -140,11 +140,9 @@ function passesIndicatorFilters(
   // Skip EXTREME volatility — too risky for automated signals
   if (features.volatilityRegime === 'EXTREME') return false;
 
-  // Ranging market guard: very low ADX + low volatility = choppy noise, not a trend
-  if (features.adx < 18 && features.volatilityRegime === 'LOW') return false;
-
-  // Minimum trend strength — completely flat markets produce no useful signals
-  if (features.adx < 10) return false;
+  // Minimum trend strength (ADX ≥ 25) — anything lower is choppy, ranging noise.
+  // This strict threshold forces the AI to only trade established, robust momentum.
+  if (features.adx < 25) return false;
 
   return true;
 }
