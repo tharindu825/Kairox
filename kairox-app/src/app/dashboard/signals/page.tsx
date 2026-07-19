@@ -561,6 +561,11 @@ export default function SignalsPage() {
           const primaryVote  = signal.votes?.find((v: any) => v.role === 'PRIMARY')?.side      || 'HOLD';
           const confVote     = signal.votes?.find((v: any) => v.role === 'CONFIRMATION')?.side || 'HOLD';
           const agreement    = primaryVote === confVote;
+          // Primary-only: primary has a direction, confirmation said HOLD.
+          // Matches backend logic: winProbability >= 0.60 → auto-traded at half size.
+          const isPrimaryOnly  = primaryVote !== 'HOLD' && confVote === 'HOLD';
+          const winProb        = signal.winProbability || 0;
+          const wasAutoTraded  = agreement || (isPrimaryOnly && winProb >= 0.60);
 
           const SideIcon    = signal.side === 'LONG' ? ArrowUpRight : signal.side === 'SHORT' ? ArrowDownRight : Minus;
           const sideBadge   = signal.side === 'LONG'  ? 'kx-badge-long'  : signal.side === 'SHORT' ? 'kx-badge-short' : 'kx-badge-hold';
@@ -715,31 +720,46 @@ export default function SignalsPage() {
 
                   {/* Model disagreement */}
                   {riskVerdict !== 'BLOCKED' && !agreement && (
-                    <div className="mt-3 p-3 rounded-md bg-yellow-500/10 border border-yellow-500/20">
-                      <div className="flex items-center justify-between gap-2 mb-1">
-                        <span className="text-xs font-bold text-yellow-400 uppercase tracking-wider flex items-center gap-1">
-                          <AlertTriangle className="w-3.5 h-3.5" /> Model Disagreement (Not Auto-Traded)
+                    wasAutoTraded ? (
+                      /* Primary-only ≥60% confidence — auto-traded at half size */
+                      <div className="mt-3 p-3 rounded-md border" style={{ background: 'rgba(99,102,241,0.08)', borderColor: 'rgba(99,102,241,0.25)' }}>
+                        <span className="text-xs font-bold uppercase tracking-wider flex items-center gap-1" style={{ color: '#818cf8' }}>
+                          <AlertTriangle className="w-3.5 h-3.5" /> Model Disagreement (Auto-Traded at Half Size)
                         </span>
-                        {signal.side !== 'HOLD' && (
-                          <button
-                            onClick={() => triggerShadowTest(signal.id)}
-                            disabled={shadowTestingIds[signal.id] === 'loading' || shadowTestingIds[signal.id] === 'done'}
-                            className="kx-btn px-3 py-1.5 text-[11px] font-semibold rounded-md flex items-center gap-1.5 transition-all duration-200 hover:scale-[1.03]"
-                            style={{
-                              background: shadowTestingIds[signal.id] === 'done' ? 'rgba(0,212,170,0.12)' : 'rgba(245,158,11,0.12)',
-                              color: shadowTestingIds[signal.id] === 'done' ? 'var(--kx-success)' : '#f59e0b',
-                              opacity: shadowTestingIds[signal.id] === 'loading' ? 0.7 : 1,
-                            }}
-                          >
-                            {shadowTestingIds[signal.id] === 'loading' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : shadowTestingIds[signal.id] === 'done' ? <CheckCircle2 className="w-3.5 h-3.5" /> : <FlaskConical className="w-3.5 h-3.5" />}
-                            {shadowTestingIds[signal.id] === 'done' ? 'Shadow Trade Created ✓' : 'Test in Paper Trading'}
-                          </button>
-                        )}
+                        <p className="text-xs mt-1" style={{ color: 'rgba(199,210,254,0.8)' }}>
+                          Primary model suggested <span className="font-semibold">{primaryVote}</span> while confirmation model suggested <span className="font-semibold">{confVote}</span>.{' '}
+                          Since primary confidence ({(winProb * 100).toFixed(0)}%) ≥ 60%, a <span className="font-semibold">half-size paper trade</span> was opened automatically.
+                        </p>
                       </div>
-                      <p className="text-xs text-yellow-300/90 mt-1">
-                        Primary model suggested <span className="font-semibold">{primaryVote}</span> while confirmation model suggested <span className="font-semibold">{confVote}</span>.
-                      </p>
-                    </div>
+                    ) : (
+                      /* Below threshold — not auto-traded, offer manual paper test */
+                      <div className="mt-3 p-3 rounded-md bg-yellow-500/10 border border-yellow-500/20">
+                        <div className="flex items-center justify-between gap-2 mb-1">
+                          <span className="text-xs font-bold text-yellow-400 uppercase tracking-wider flex items-center gap-1">
+                            <AlertTriangle className="w-3.5 h-3.5" /> Model Disagreement (Not Auto-Traded)
+                          </span>
+                          {signal.side !== 'HOLD' && (
+                            <button
+                              onClick={() => triggerShadowTest(signal.id)}
+                              disabled={shadowTestingIds[signal.id] === 'loading' || shadowTestingIds[signal.id] === 'done'}
+                              className="kx-btn px-3 py-1.5 text-[11px] font-semibold rounded-md flex items-center gap-1.5 transition-all duration-200 hover:scale-[1.03]"
+                              style={{
+                                background: shadowTestingIds[signal.id] === 'done' ? 'rgba(0,212,170,0.12)' : 'rgba(245,158,11,0.12)',
+                                color: shadowTestingIds[signal.id] === 'done' ? 'var(--kx-success)' : '#f59e0b',
+                                opacity: shadowTestingIds[signal.id] === 'loading' ? 0.7 : 1,
+                              }}
+                            >
+                              {shadowTestingIds[signal.id] === 'loading' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : shadowTestingIds[signal.id] === 'done' ? <CheckCircle2 className="w-3.5 h-3.5" /> : <FlaskConical className="w-3.5 h-3.5" />}
+                              {shadowTestingIds[signal.id] === 'done' ? 'Shadow Trade Created ✓' : 'Test in Paper Trading'}
+                            </button>
+                          )}
+                        </div>
+                        <p className="text-xs text-yellow-300/90 mt-1">
+                          Primary model suggested <span className="font-semibold">{primaryVote}</span> while confirmation model suggested <span className="font-semibold">{confVote}</span>.{' '}
+                          Confidence ({(winProb * 100).toFixed(0)}%) is below the 60% threshold for auto-execution.
+                        </p>
+                      </div>
+                    )
                   )}
                 </div>
 

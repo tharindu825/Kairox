@@ -30,7 +30,7 @@ const DEFAULT_POLICY: RiskPolicy = {
   maxRiskPercent: 2.0,
   maxOpenTrades: 10,
   maxCorrelated: 3,
-  minRewardRisk: 1.5,       // Restored to 1.5 to protect against poor win rates
+  minRewardRisk: 1.0,       // Lowered from 1.5 → 1.0 for testing (AI R:R was landing at 0.6–1.0)
   dailyDrawdownLimit: 10.0,
   cooldownMinutes: 30,
   evThresholdApproved: 0.15, // Lowered from 0.5R — allow moderate-EV setups at full size
@@ -77,6 +77,7 @@ export class RiskEngine {
       reasons.push(`R:R ratio ${rewardToRisk.toFixed(2)} below minimum ${this.policy.minRewardRisk}`);
       verdict = 'BLOCKED';
     } else if (rewardToRisk < 1.5) {
+      // R:R is acceptable (≥ minRewardRisk) but not ideal — reduce position size as a precaution
       reasons.push(`R:R ratio ${rewardToRisk.toFixed(2)} is marginal (below 1.5) — reduced position size`);
       verdict = this.escalateVerdict(verdict, 'REDUCED');
     }

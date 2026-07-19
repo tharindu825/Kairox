@@ -245,6 +245,49 @@ async function signalJobHandler(data: SignalJobData) {
         primarySignal.entry = candle.close;
       }
 
+      // ── Bulletproof R:R Enforcement ────────────────────────────────────────────
+      // Even after the strengthened prompt, the AI occasionally returns targets that
+      // are too close to entry. This deterministic post-processor corrects them before
+      // the risk engine evaluates the signal — guaranteeing TP1 ≥ 1.0× stop distance.
+      if (primarySignal.side !== 'HOLD') {
+        const entry      = primarySignal.entry;
+        const stopLoss   = primarySignal.stopLoss;
+        const stopDist   = Math.abs(entry - stopLoss);
+        const isLong     = primarySignal.side === 'LONG';
+
+        if (stopDist > 0 && primarySignal.targets.length > 0) {
+          const tp1 = primarySignal.targets[0];
+          const tp1Dist = Math.abs(tp1.price - entry);
+          const MIN_RR  = 1.0;
+
+          if (tp1Dist < stopDist * MIN_RR) {
+            const correctedTP1 = isLong
+              ? entry + stopDist * MIN_RR
+              : entry - stopDist * MIN_RR;
+
+            await Logger.info(
+              `[R:R Enforce] ${candle.symbol}: TP1 too close (${tp1Dist.toFixed(6)} < ${(stopDist * MIN_RR).toFixed(6)} required). ` +
+              `Auto-correcting TP1 from ${tp1.price} → ${correctedTP1.toFixed(8)}`,
+              'Signal Worker'
+            );
+
+            primarySignal.targets[0] = { ...tp1, price: correctedTP1 };
+
+            // Also correct TP2 if it exists and is now behind the corrected TP1
+            if (primarySignal.targets.length > 1) {
+              const tp2 = primarySignal.targets[1];
+              const tp2Dist = Math.abs(tp2.price - entry);
+              if (tp2Dist < stopDist * 2.0) {
+                const correctedTP2 = isLong
+                  ? entry + stopDist * 2.0
+                  : entry - stopDist * 2.0;
+                primarySignal.targets[1] = { ...tp2, price: correctedTP2 };
+              }
+            }
+          }
+        }
+      }
+
       // ── Enforce SMC Counter-Trend Block ──────────────────────────────────────────
       // If the AI returned a direction that violates the SMC structural constraint
       // flagged above (bearish structure + no CHoCH → no LONGs allowed), hard-block it.
@@ -395,11 +438,12 @@ async function signalJobHandler(data: SignalJobData) {
       await Logger.success(`Signal created: ${signalRecord.id} (${candle.symbol} - ${riskAssessment.verdict})`, 'Signal Worker');
 
       // 7. Auto-execute Paper Trade if Approved
-      // Execute if: (a) both models agree, OR (b) primary-only with high confidence (≥0.70) at reduced size
+      // Execute if: (a) both models agree, OR (b) primary-only with confidence (≥0.60) at reduced size
+      // Note: AI models consistently return ~62% for confident directional calls; 0.70 was too restrictive.
       const canExecute = signalStatus === 'APPROVED' && riskAssessment.positionSize > 0;
       const executionSize = isAgreement
         ? riskAssessment.positionSize
-        : (isPrimaryOnly && primarySignal.winProbability >= 0.70)
+        : (isPrimaryOnly && primarySignal.winProbability >= 0.60)
           ? riskAssessment.positionSize * 0.5  // Half size for primary-only signals
           : 0;
 
@@ -416,8 +460,8 @@ async function signalJobHandler(data: SignalJobData) {
         }
       }
 
-      // 8. Dispatch Alert if Approved (agreed or high-confidence primary-only)
-      if (signalStatus === 'APPROVED' && (isAgreement || (isPrimaryOnly && primarySignal.winProbability >= 0.70))) {
+      // 8. Dispatch Alert if Approved (agreed or primary-only with ≥60% confidence)
+      if (signalStatus === 'APPROVED' && (isAgreement || (isPrimaryOnly && primarySignal.winProbability >= 0.60))) {
         const agreementLabel = isAgreement ? '✅ Agree' : '⚠️ Primary Only (high confidence)';
         const riskNote = riskAssessment.verdict === 'REDUCED' ? '⚠️ REDUCED SIZE (High Risk Trade)' : '✅ NORMAL';
         

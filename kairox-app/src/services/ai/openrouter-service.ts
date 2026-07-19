@@ -202,16 +202,22 @@ ANALYSIS FRAMEWORK — Analyze in this order:
 7. FINAL DECISION: Generate a signal if 2+ factors align. Do NOT default to HOLD.
 
 TRADING RULES:
-1. TREND ALIGNMENT: Prefer LONG if Price > EMA200 and structure is BULLISH. Prefer SHORT if Price < EMA200 and structure is BEARISH. Counter-trend setups require CHoCH + order block confluence.
-2. MOMENTUM CAUTION: If RSI > 75 or StochRSI %K > 85, exercise caution with LONGs but do not automatically reject if SMC structure supports the trade. Similarly for RSI < 25 / StochRSI %K < 15 with SHORTs.
-3. RANGING MARKETS: If ADX < 20, take range-bound trades at key order blocks, BB extremes, or FVG zones. SMC-based setups ARE valid signals in ranging markets.
-4. ORDER BLOCKS & FVGs: Prioritize entries near unmitigated order blocks and unfilled FVGs — these are high-probability zones.
-5. R:R MINIMUM: Aim for at least 1:1 Reward-to-Risk. Higher is better but 1:1 is acceptable for high-probability setups (>60% win rate).
+1. ⚠️ R:R IS MANDATORY — THIS IS YOUR MOST IMPORTANT RULE:
+   - stopDistance = abs(entry - stopLoss)
+   - TP1 MUST be at least 1.0 × stopDistance away from entry (in the trade direction).
+   - For a LONG: TP1 >= entry + stopDistance. For a SHORT: TP1 <= entry - stopDistance.
+   - Example: entry=0.01515, stopLoss=0.01545 → stopDistance=0.00030 → TP1 must be ≤ 0.01485 (for SHORT).
+   - Example: entry=1.0000, stopLoss=0.9700 → stopDistance=0.0300 → TP1 must be ≥ 1.0300 (for LONG).
+   - TP2 should be 2.0 × stopDistance from entry.
+   - The system will BLOCK signals where TP1 does not meet this minimum. Do not submit signals with bad R:R.
+2. TREND ALIGNMENT: Prefer LONG if Price > EMA200 and structure is BULLISH. Prefer SHORT if Price < EMA200 and structure is BEARISH. Counter-trend setups require CHoCH + order block confluence.
+3. MOMENTUM CAUTION: If RSI > 75 or StochRSI %K > 85, exercise caution with LONGs but do not automatically reject if SMC structure supports the trade. Similarly for RSI < 25 / StochRSI %K < 15 with SHORTs.
+4. RANGING MARKETS: If ADX < 20, take range-bound trades at key order blocks, BB extremes, or FVG zones. SMC-based setups ARE valid signals in ranging markets.
+5. ORDER BLOCKS & FVGs: Prioritize entries near unmitigated order blocks and unfilled FVGs — these are high-probability zones.
 6. EXPECTANCY: Your primary metric is 'winProbability' (0.0-1.0) of hitting TP1 before Stop Loss. Be realistic but not overly pessimistic. If probability is < 0.45, signal MUST be HOLD. Assign 0.55+ to setups with structure alignment. Assign 0.65+ to high-conviction setups.
 7. STOP LOSS: Place stop loss at 1.0-2.5x ATR from entry. Prefer placing stops beyond key order blocks or swing points.
 8. ENTRY PRICE: Entry MUST be within 0.5% of the CURRENT PRICE. Use market-entry pricing.
-9. TARGETS: Set TP1 at minimum 1x the stop distance from entry. Set TP2 at 2x if structure supports it.
-10. RESPOND ONLY WITH JSON matching the schema precisely.
+9. RESPOND ONLY WITH JSON matching the schema precisely.
 
 PRICE PRECISION RULES:
 - For coins priced above $100: use 2 decimal places (e.g., 65432.10).
@@ -219,7 +225,7 @@ PRICE PRECISION RULES:
 - For coins priced $0.01-$1: use 4-5 decimal places (e.g., 0.08523).
 - For coins priced below $0.01: use 5-6 decimal places (e.g., 0.008523).
 - Entry, stopLoss, and targets MUST be meaningfully different values.
-- The distance between entry and first target must be at least 1x the stopLoss distance.`;
+- The distance between entry and first target MUST be at least 1x the stopLoss distance (Rule #1 above).`;
   }
 
   // ── User Prompt ─────────────────────────────────────────────────────────────
@@ -299,11 +305,24 @@ PRICE PRECISION RULES:
       ewSection = 'ELLIOTT WAVE:\n' + ewLines.join('\n');
     }
 
+    const atr = features.atr || 0;
+    // Compute a concrete minimum stop distance for the AI (1x ATR is the baseline)
+    const minStopDist = atr > 0 ? atr : price * 0.005; // fallback: 0.5% of price
+    const minTP1Long  = price + minStopDist;
+    const minTP1Short = price - minStopDist;
+
     return `Analyze the following market data and generate a trading signal:
 
 ASSET: ${symbol}
 TIMEFRAME: ${timeframe}
 CURRENT PRICE: ${formatPrice(price)}
+
+⚠️ R:R REQUIREMENT (RULE #1 — MANDATORY):
+- ATR: ${atr.toFixed(pricePrecision)} | Minimum stop distance reference: ${formatPrice(minStopDist)}
+- If you go LONG  → entry ≈ ${formatPrice(price)}, so TP1 MUST be ≥ ${formatPrice(minTP1Long)}
+- If you go SHORT → entry ≈ ${formatPrice(price)}, so TP1 MUST be ≤ ${formatPrice(minTP1Short)}
+- Place your stopLoss first (at a logical level beyond structure), then set TP1 at least 1× that stop distance away.
+- The system will AUTO-CORRECT targets that are too close, but try to pick technically valid levels.
 
 TECHNICAL INDICATORS:
 - RSI(14): ${features.rsi.toFixed(2)}
@@ -330,7 +349,7 @@ ${ewSection}
 RECENT CANDLES (last ${features.recentCandles.length}, newest last):
 ${candleTable}
 
-IMPORTANT: Use ${pricePrecision} decimal places for entry, stopLoss, and target prices. Entry, stopLoss, and targets MUST be different values — never round them to the same number.
+IMPORTANT: Use ${pricePrecision} decimal places for entry, stopLoss, and target prices. Entry, stopLoss, and targets MUST be different values — never round them to the same number. TP1 MUST satisfy Rule #1 (R:R ≥ 1.0) as computed above.
 
 Generate a trading signal as a JSON object.`;
   }
