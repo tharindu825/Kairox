@@ -10,6 +10,7 @@ import { alertQueue } from './queues';
 import { NormalizedCandle } from '@/services/market-data/binance';
 import { Decimal } from 'decimal.js';
 import { publishNotification } from '@/lib/notify';
+import { formatFuturesSymbol, formatPrice } from '@/lib/binance-futures-format';
 
 export interface SignalJobData {
   candle: NormalizedCandle;
@@ -465,16 +466,22 @@ async function signalJobHandler(data: SignalJobData) {
         const agreementLabel = isAgreement ? '✅ Agree' : '⚠️ Primary Only (high confidence)';
         const riskNote = riskAssessment.verdict === 'REDUCED' ? '⚠️ REDUCED SIZE (High Risk Trade)' : '✅ NORMAL';
         
+        const { displaySymbol, multiplier } = formatFuturesSymbol(candle.symbol);
+        const displayEntry = formatPrice(primarySignal.entry, multiplier);
+        const displayTarget = primarySignal.targets[0] ? formatPrice(primarySignal.targets[0].price, multiplier) : 'N/A';
+        const displayStop = formatPrice(primarySignal.stopLoss, multiplier);
+        const displaySize = (executionSize / multiplier).toFixed(4);
+
         const message = `🚨 NEW APPROVED SIGNAL 🚨\n\n` +
           `Type: Cryptocurrency\n` +
-          `Asset: ${candle.symbol}\n` +
+          `Asset: ${displaySymbol}\n` +
           `Side: ${primarySignal.side}\n` +
           `Win Prob: ${(primarySignal.winProbability * 100).toFixed(0)}%\n` +
-          `Entry: ${primarySignal.entry}\n` +
-          `Target: ${primarySignal.targets[0]?.price}\n` +
-          `Stop: ${primarySignal.stopLoss}\n` +
+          `Entry: ${displayEntry}\n` +
+          `Target: ${displayTarget}\n` +
+          `Stop: ${displayStop}\n` +
           `R:R: ${riskAssessment.rewardToRisk.toFixed(2)}\n` +
-          `Size: ${executionSize.toFixed(4)} units\n` +
+          `Size: ${displaySize} units\n` +
           `Risk: ${riskNote}\n\n` +
           `Models: ${agreementLabel}`;
 

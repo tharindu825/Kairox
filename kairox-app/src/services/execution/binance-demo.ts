@@ -1,5 +1,6 @@
 import ccxt, { binanceusdm } from 'ccxt';
 import { env } from '@/lib/env';
+import { formatFuturesSymbol } from '@/lib/binance-futures-format';
 
 export class BinanceDemoService {
   private exchange: binanceusdm;
@@ -53,7 +54,8 @@ export class BinanceDemoService {
     takeProfit: number
   ) {
     await this.ensureInitialized();
-    const symbol = this.getStandardSymbol(rawSymbol);
+    const { displaySymbol, multiplier } = formatFuturesSymbol(rawSymbol);
+    const symbol = this.getStandardSymbol(displaySymbol);
     const ticker = await this.exchange.fetchTicker(symbol).catch(() => ({ last: undefined }));
     const currentPrice = ticker.last;
 
@@ -62,11 +64,16 @@ export class BinanceDemoService {
       await this.exchange.loadMarkets();
     }
     
+    const adjustedQuantity = quantity / multiplier;
+    const adjustedEntryPrice = entryPrice * multiplier;
+    const adjustedStopLoss = stopLoss * multiplier;
+    const adjustedTakeProfit = takeProfit * multiplier;
+
     // Format quantities and prices to Binance specifications
-    const formattedQty = Number(this.exchange.amountToPrecision(symbol, quantity));
-    const formattedEntry = Number(this.exchange.priceToPrecision(symbol, entryPrice));
-    const formattedSL = Number(this.exchange.priceToPrecision(symbol, stopLoss));
-    const formattedTP = Number(this.exchange.priceToPrecision(symbol, takeProfit));
+    const formattedQty = Number(this.exchange.amountToPrecision(symbol, adjustedQuantity));
+    const formattedEntry = Number(this.exchange.priceToPrecision(symbol, adjustedEntryPrice));
+    const formattedSL = Number(this.exchange.priceToPrecision(symbol, adjustedStopLoss));
+    const formattedTP = Number(this.exchange.priceToPrecision(symbol, adjustedTakeProfit));
 
     // Check if we should use Market or Limit
     let isMarket = false;
@@ -127,7 +134,7 @@ export class BinanceDemoService {
 
   async fetchOpenOrders(rawSymbol?: string) {
     await this.ensureInitialized();
-    const symbol = rawSymbol ? this.getStandardSymbol(rawSymbol) : undefined;
+    const symbol = rawSymbol ? this.getStandardSymbol(formatFuturesSymbol(rawSymbol).displaySymbol) : undefined;
     return await this.exchange.fetchOpenOrders(symbol);
   }
 
@@ -138,7 +145,8 @@ export class BinanceDemoService {
 
   async closePosition(rawSymbol: string) {
     await this.ensureInitialized();
-    const symbol = this.getStandardSymbol(rawSymbol);
+    const { displaySymbol } = formatFuturesSymbol(rawSymbol);
+    const symbol = this.getStandardSymbol(displaySymbol);
     
     // 1. Cancel all open limit/conditional orders for this symbol first
     try {
@@ -150,7 +158,7 @@ export class BinanceDemoService {
 
     // 2. Fetch active position
     const positions = await this.fetchPositions();
-    const pos = positions.find(p => p.symbol === symbol || p.symbol === rawSymbol);
+    const pos = positions.find(p => p.symbol === symbol || p.symbol === rawSymbol || p.symbol === displaySymbol);
     if (!pos || !pos.contracts || pos.contracts === 0) {
       // If there's no active position, just returning is fine since we already canceled the limit orders
       return { status: 'closed', message: `No active position to close, but open orders were canceled for ${symbol}` };
