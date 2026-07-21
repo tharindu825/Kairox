@@ -393,26 +393,35 @@ export class PaperTradingService {
 
     if (!sig || sig.status !== 'APPROVED') return;
 
-    // Fetch the latest price to see if we can fill immediately at a better or equal price
+    // ── Binance-style limit order fill check ─────────────────────────────────
+    // LONG  limit buy:  market price ≤ entry → fills immediately at market price
+    //                   market price >  entry → PENDING, waits for price to drop to entry
+    // SHORT limit sell: market price ≥ entry → fills immediately at market price
+    //                   market price <  entry → PENDING, waits for price to rise to entry
     let fillPrice = Number(sig.entry);
-    let status = 'PENDING';
-    let openedAt = new Date();
+    let status: 'OPEN' | 'PENDING' = 'PENDING';
+    const openedAt = new Date();
+    let filledImmediately = false;
 
     try {
       const { marketDataService } = await import('../market-data');
       const latestPrice = await marketDataService.getLatestPrice(sig.symbol);
       if (latestPrice !== null) {
         const side = sig.side as 'LONG' | 'SHORT';
-        const isBetterOrEqual = side === 'LONG' ? latestPrice <= fillPrice : latestPrice >= fillPrice;
-        if (isBetterOrEqual) {
+        const canFillImmediately = side === 'LONG'
+          ? latestPrice <= fillPrice   // market already at/below our buy limit
+          : latestPrice >= fillPrice;  // market already at/above our sell limit
+        if (canFillImmediately) {
           status = 'OPEN';
           fillPrice = latestPrice;
-          openedAt = new Date();
-          console.log(`[Paper Trade] Signal ${signalId} immediately filled at market price $${fillPrice} (better/equal than entry limit $${sig.entry})`);
+          filledImmediately = true;
+          console.log(`[Paper Trade] Signal ${signalId} immediately filled at market price $${latestPrice} (${side} limit was $${sig.entry})`);
+        } else {
+          console.log(`[Paper Trade] Signal ${signalId} placed as PENDING limit order at $${fillPrice} (current market: $${latestPrice})`);
         }
       }
     } catch (err) {
-      console.error(`[Paper Trade] Failed to get latest price for immediate fill check:`, err);
+      console.error(`[Paper Trade] Failed to get latest price for limit fill check:`, err);
     }
 
     const entryFee = calcFee(fillPrice, quantity);
@@ -444,6 +453,20 @@ export class PaperTradingService {
 
     const result = await db.collection('paperOrders').insertOne(orderData);
     console.log(`[Paper Trade] Order ${result.insertedId} created for signal ${signalId} — ${status} at $${fillPrice} (entry fee $${round4(entryFee)})`);
+
+    // Telegram alert: different messages for immediate fill vs pending limit order.
+    // For PENDING orders, the TRADE OPENED alert fires later in _processPending when the limit price is touched.
+    if (filledImmediately) {
+      await alertQueue.add('send-telegram', {
+        signalId,
+        message: `🚀 TRADE OPENED: ${sig.symbol}\n\nSide: ${sig.side}\nEntry: $${fmt(fillPrice)}\nSize: ${quantity} units\nSL: $${fmt(Number(sig.stopLoss))}\nFee: $${fmt(entryFee)}\n\n⚡ Filled immediately at market price`,
+      });
+    } else {
+      await alertQueue.add('send-telegram', {
+        signalId,
+        message: `⏳ LIMIT ORDER PLACED: ${sig.symbol}\n\nSide: ${sig.side}\nLimit Entry: $${fmt(fillPrice)}\nSize: ${quantity} units\nSL: $${fmt(Number(sig.stopLoss))}\n\n🕐 Waiting for market to reach limit price (expires in 8h)`,
+      });
+    }
 
     // Dynamically subscribe to the symbol's market data stream so Kairox starts receiving live candle ticks
     try {

@@ -149,6 +149,7 @@ export default function RiskPage() {
                 </h3>
                 <div className="flex bg-black/20 rounded-md p-1 border border-white/5">
                   {[
+                    { id: 'OPEN', label: 'Open' },
                     { id: 'ALL', label: 'Recent' },
                     { id: 'HISTORY', label: 'All History' },
                     { id: 'WINS', label: 'Wins' },
