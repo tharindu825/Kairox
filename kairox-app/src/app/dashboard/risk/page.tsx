@@ -33,6 +33,10 @@ export default function RiskPage() {
   const [tradeTab, setTradeTab] = useState('ALL');
   const { data, error, isLoading, mutate: mutateRisk } = useSWR('/api/risk', fetcher, { refreshInterval: 5000 });
   const { data: paperData, mutate: mutatePaper } = useSWR(`/api/paper-trades?status=${tradeTab}`, fetcher, { refreshInterval: 5000 });
+  // Always fetch all-time stats independently of the tab filter, so Win Rate and Active Trades
+  // cards always show accurate totals regardless of which tab is selected.
+  const { data: allStatsData } = useSWR('/api/paper-trades?status=ALL', fetcher, { refreshInterval: 5000 });
+  const allStats = allStatsData?.stats ?? { winRate: 0, wins: 0, losses: 0, totalTrades: 0, openTrades: 0 };
   const [isKilling, setIsKilling] = useState(false);
   const metrics = data?.metrics ?? {
     capitalAtRisk: 0,
@@ -118,9 +122,11 @@ export default function RiskPage() {
                 <span className="text-sm font-medium" style={{ color: 'var(--kx-text-muted)' }}>Active Trades</span>
                 <Crosshair className="w-4 h-4" style={{ color: 'var(--kx-accent)' }} />
               </div>
-              <div className="text-2xl font-bold font-mono mb-1" style={{ color: 'var(--kx-text-primary)' }}>{metrics.openTrades} <span className="text-sm" style={{ color: 'var(--kx-text-muted)' }}>/ {metrics.maxOpenTrades}</span></div>
+              <div className="text-2xl font-bold font-mono mb-1" style={{ color: 'var(--kx-text-primary)' }}>
+                {allStats.openTrades} <span className="text-sm" style={{ color: 'var(--kx-text-muted)' }}>/ {metrics.maxOpenTrades}</span>
+              </div>
               <div className="w-full bg-black/20 rounded-full h-1.5 mt-3">
-                <div className="h-1.5 rounded-full transition-all" style={{ width: `${(metrics.openTrades / metrics.maxOpenTrades) * 100}%`, background: 'var(--kx-accent)' }} />
+                <div className="h-1.5 rounded-full transition-all" style={{ width: `${Math.min((allStats.openTrades / metrics.maxOpenTrades) * 100, 100)}%`, background: 'var(--kx-accent)' }} />
               </div>
               <div className="text-xs mt-2 text-right" style={{ color: 'var(--kx-text-muted)' }}>Capacity</div>
             </motion.div>
@@ -131,10 +137,10 @@ export default function RiskPage() {
                 <Target className="w-4 h-4" style={{ color: 'var(--kx-success)' }} />
               </div>
               <div className="text-2xl font-bold font-mono mb-1" style={{ color: 'var(--kx-text-primary)' }}>
-                {paperData?.stats?.winRate || 0}%
+                {allStats.winRate}%
               </div>
               <div className="text-xs mt-3" style={{ color: 'var(--kx-text-muted)' }}>
-                W: {paperData?.stats?.wins || 0} / L: {paperData?.stats?.losses || 0} ({paperData?.stats?.totalTrades || 0} total)
+                W: {allStats.wins} / L: {allStats.losses} ({allStats.totalTrades} total)
               </div>
             </motion.div>
           </div>
