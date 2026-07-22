@@ -3,6 +3,7 @@ import { getDb } from '@/lib/mongodb';
 import { auth } from '@/lib/auth';
 import { Decimal } from 'decimal.js';
 import { ObjectId } from 'mongodb';
+import { marketDataService } from '@/services/market-data';
 
 export async function GET() {
   try {
@@ -31,12 +32,32 @@ export async function GET() {
 
     const openTrades = openOrders.length;
 
-    // Calculate total capital at risk from open positions
-    const totalRiskPercent = openOrders.reduce((sum, order) => {
-      return sum + (order.signal?.riskAssessment?.riskPercent || 0);
+    // Assume a starting paper balance of $10,000
+    const paperBalance = Number(process.env.PAPER_BALANCE || 10000);
+
+    // ─── Capital at Risk ─────────────────────────────────────────────────
+    // Primary source: riskAssessment.riskPercent stored by the signal worker.
+    // Fallback: compute directly from order entry/stopLoss/quantity so the
+    // card always shows a real number even when the riskAssessment link is
+    // missing (e.g. manually started trades or very old orders).
+    const totalRiskPercent = openOrders.reduce((sum, orderRaw) => {
+      const order = orderRaw as any;
+      const assessedRisk: number = order.signal?.riskAssessment?.riskPercent ?? 0;
+      if (assessedRisk > 0) return sum + assessedRisk;
+
+      // Fallback: derive risk% from stop-loss distance when riskAssessment is absent
+      const entry = Number(order.entryPrice ?? 0);
+      const sl    = Number(order.stopLoss   ?? 0);
+      const qty   = Number(order.remainingQty ?? order.quantity ?? 0);
+      if (entry > 0 && sl > 0 && qty > 0 && paperBalance > 0) {
+        const riskDollar = Math.abs(entry - sl) * qty;
+        return sum + (riskDollar / paperBalance) * 100;
+      }
+      return sum;
     }, 0);
 
-    // Calculate daily P&L from orders closed today
+    // ─── Daily P&L (closed today + open unrealised) ───────────────────────
+    // Closed / stopped trades locked in today
     const todayStart = new Date();
     todayStart.setHours(0, 0, 0, 0);
 
@@ -47,12 +68,28 @@ export async function GET() {
       })
       .toArray();
 
-    const dailyPnL = closedTodayDocs.reduce((sum, order) => {
+    const closedTodayPnL = closedTodayDocs.reduce((sum, order) => {
       return sum + (order.pnl ? new Decimal(order.pnl).toNumber() : 0);
     }, 0);
 
-    // Assume a starting paper balance of $10,000
-    const paperBalance = Number(process.env.PAPER_BALANCE || 10000);
+    // Unrealised P&L from currently OPEN orders (uses live market price)
+    let openUnrealisedPnL = 0;
+    for (const orderRaw of openOrdersDocs) {
+      const o = orderRaw as any;
+      marketDataService.subscribeSymbol(o.symbol); // ensure WS is tracking
+      const latest = await marketDataService.getLatestPrice(o.symbol);
+      if (latest) {
+        const entryDec   = new Decimal(o.entryPrice);
+        const currentDec = new Decimal(latest);
+        const remainQty  = new Decimal(o.remainingQty ?? o.quantity);
+        const gross = o.side === 'LONG'
+          ? currentDec.minus(entryDec).times(remainQty)
+          : entryDec.minus(currentDec).times(remainQty);
+        openUnrealisedPnL += gross.toNumber() + Number(o.realizedPnl ?? 0);
+      }
+    }
+
+    const dailyPnL = closedTodayPnL + openUnrealisedPnL;
     const dailyDrawdown = paperBalance > 0 ? (dailyPnL / paperBalance) * 100 : 0;
 
     // Count correlated open pairs
