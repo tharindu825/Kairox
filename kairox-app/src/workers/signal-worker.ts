@@ -438,9 +438,9 @@ async function signalJobHandler(data: SignalJobData) {
 
       await Logger.success(`Signal created: ${signalRecord.id} (${candle.symbol} - ${riskAssessment.verdict})`, 'Signal Worker');
 
-      // 7. Auto-execute Paper Trade if Approved
-      // Execute if: (a) both models agree, OR (b) primary-only with confidence (≥0.60) at reduced size
-      // Note: AI models consistently return ~62% for confident directional calls; 0.70 was too restrictive.
+      // 7. Dispatch Alert if Approved (agreed or primary-only with ≥60% confidence)
+      // NOTE: This must run BEFORE executeApprovedSignal so Telegram receives notifications
+      // in the correct order: NEW APPROVED SIGNAL → LIMIT ORDER PLACED → TRADE OPENED
       const canExecute = signalStatus === 'APPROVED' && riskAssessment.positionSize > 0;
       const executionSize = isAgreement
         ? riskAssessment.positionSize
@@ -448,20 +448,6 @@ async function signalJobHandler(data: SignalJobData) {
           ? riskAssessment.positionSize * 0.5  // Half size for primary-only signals
           : 0;
 
-      if (canExecute && executionSize > 0) {
-        try {
-          await paperTradingService.executeApprovedSignal(
-            signalRecord.id,
-            executionSize
-          );
-          const mode = isAgreement ? 'agreed' : 'primary-only (reduced)';
-          await Logger.info(`Paper trade prepared for signal ${signalRecord.id} (${mode}, size=${executionSize.toFixed(4)})`, 'Signal Worker');
-        } catch (err) {
-          await Logger.error(`Failed to open paper trade: ${(err as Error).message}`, 'Signal Worker');
-        }
-      }
-
-      // 8. Dispatch Alert if Approved (agreed or primary-only with ≥60% confidence)
       if (signalStatus === 'APPROVED' && (isAgreement || (isPrimaryOnly && primarySignal.winProbability >= 0.60))) {
         const agreementLabel = isAgreement ? '✅ Agree' : '⚠️ Primary Only (high confidence)';
         const riskNote = riskAssessment.verdict === 'REDUCED' ? '⚠️ REDUCED SIZE (High Risk Trade)' : '✅ NORMAL';
@@ -489,6 +475,22 @@ async function signalJobHandler(data: SignalJobData) {
           signalId: signalRecord.id,
           message: message
         });
+      }
+
+      // 8. Auto-execute Paper Trade if Approved (runs after signal alert to preserve notification order)
+      // Execute if: (a) both models agree, OR (b) primary-only with confidence (≥0.60) at reduced size
+      // Note: AI models consistently return ~62% for confident directional calls; 0.70 was too restrictive.
+      if (canExecute && executionSize > 0) {
+        try {
+          await paperTradingService.executeApprovedSignal(
+            signalRecord.id,
+            executionSize
+          );
+          const mode = isAgreement ? 'agreed' : 'primary-only (reduced)';
+          await Logger.info(`Paper trade prepared for signal ${signalRecord.id} (${mode}, size=${executionSize.toFixed(4)})`, 'Signal Worker');
+        } catch (err) {
+          await Logger.error(`Failed to open paper trade: ${(err as Error).message}`, 'Signal Worker');
+        }
       }
 
       // 9. Push SSE Notification to UI
